@@ -1,0 +1,35 @@
+{
+  "name": "ad-script-assist-server",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "dotenv": "^17.4.2",
+    "lit": "^3.3.3",
+    "openai": "^6.44.0"
+  },
+  "scripts": {
+    "predev": "tsx scripts/compile-skills.ts",
+    "dev": "vite",
+    "prebuild": "tsx scripts/compile-skills.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:setup": "tsx tests/setup_tests.ts",
+    "pretest:cli": "tsx scripts/compile-skills.ts",
+    "test:cli": "tsx --test tests/cli/**/*.test.ts",
+    "pretest:ui": "tsx scripts/compile-skills.ts",
+    "test:ui": "tsx --test tests/ui/**/*.test.ts",
+    "pretest:e2e": "tsx scripts/compile-skills.ts",
+    "test:e2e": "tsx --test tests/e2e/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "puppeteer": "^25.1.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}
