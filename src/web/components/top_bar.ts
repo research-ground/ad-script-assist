@@ -17,6 +17,7 @@
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {appState} from '../../core/app_state';
+import {getVideoExporter} from '../../av/video_exporter';
 import {AppController} from '../controller/app_controller';
 import {showConfirm} from './confirm_modal';
 
@@ -24,6 +25,7 @@ import {showConfirm} from './confirm_modal';
 export class TopBar extends LitElement {
   @state() private showExportMenu = false;
   @state() private isLocalVideo = false;
+  @state() private canExportVideo = false;
   @state() private isPlayEnabled = false;
   @state() private isExportEnabled = false;
   @state() private isClearEnabled = false;
@@ -58,6 +60,14 @@ export class TopBar extends LitElement {
 
   private toggleExportMenu() {
     this.showExportMenu = !this.showExportMenu;
+    if (this.showExportMenu && this.isLocalVideo) {
+      void getVideoExporter()
+        .then((exporter) => exporter.isSupported())
+        .then(
+          (supported) => (this.canExportVideo = supported),
+          () => (this.canExportVideo = false),
+        );
+    }
   }
 
   private handleExport(type: string) {
@@ -244,6 +254,15 @@ export class TopBar extends LitElement {
               <div class="dropdown-menu">
                 <button @click=${() => this.handleExport('webvtt')}>Export WebVTT</button>
                 <button @click=${() => this.handleExport('audio')}>Export Audio</button>
+                <button
+                  @click=${() => this.handleExport('video')}
+                  ?disabled=${!this.isLocalVideo || !this.canExportVideo}
+                  title=${!this.isLocalVideo
+                    ? 'Only available for local videos'
+                    : !this.canExportVideo
+                      ? 'Requires a browser with built-in AAC audio encoding'
+                      : ''}
+                >Export Mixed Video</button>
 
               </div>
             ` : ''}

@@ -6,21 +6,20 @@
     "@google/genai": "^2.8.0",
     "dotenv": "^17.4.2",
     "lit": "^3.3.3",
+    "mediabunny": "1.57.0",
     "openai": "^6.44.0"
   },
   "scripts": {
-    "predev": "tsx scripts/compile-skills.ts",
     "dev": "vite",
-    "prebuild": "tsx scripts/compile-skills.ts",
     "build": "vite build",
     "preview": "vite preview",
     "test:setup": "tsx tests/setup_tests.ts",
-    "pretest:cli": "tsx scripts/compile-skills.ts",
-    "test:cli": "tsx --test tests/cli/**/*.test.ts",
-    "pretest:ui": "tsx scripts/compile-skills.ts",
-    "test:ui": "tsx --test tests/ui/**/*.test.ts",
-    "pretest:e2e": "tsx scripts/compile-skills.ts",
-    "test:e2e": "tsx --test tests/e2e/**/*.test.ts"
+    "pretest:cli": "tsx tests/setup_tests.ts",
+    "test:cli": "tsx --test --test-concurrency=1 tests/cli/**/*.test.ts",
+    "pretest:ui": "tsx tests/setup_tests.ts",
+    "test:ui": "tsx --test --test-concurrency=1 tests/ui/**/*.test.ts",
+    "pretest:e2e": "tsx tests/setup_tests.ts",
+    "test:e2e": "tsx --test --test-concurrency=1 tests/e2e/**/*.test.ts"
   },
   "engines": {
     "node": ">=20.0.0"

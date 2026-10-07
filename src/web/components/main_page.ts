@@ -81,6 +81,7 @@ export class MainPage extends LitElement {
   @query('#adTextArea') adTextArea!: AdTextArea;
   @query('#agentInputComponent') agentInput!: AgentInput;
   @query('#agentChat') agentChat!: AgentChat;
+  @query('settings-modal') settingsModal!: SettingsModal;
 
   private readonly controller = AppController.getInstance();
   private readonly unsubscribes: Array<() => void> = [];

@@ -16,8 +16,9 @@ AD Script Assist supports multiple model providers and video sources to provide 
   - **Local Video**: Upload a local video file (up to 75MB, under 10 minutes). The file's name prefixed with `local_` (e.g., `local_my-ad-creative.mp4`) is used as the project identifier (CID) in storage.
 - **Dynamic TTS Audio Generation**:
   - Highlights modified cues in a line-numbered WebVTT script editor.
-  - Generates speed-adjusted, pitch-corrected TTS audio clips for modified sections on-the-fly using `SoundTouchJS`.
-  - Compiles silent pads and audio clips into a single, synchronized track via `Crunker`.
+  - Generates TTS audio clips for modified sections on-the-fly.
+  - Compiles silent pads and audio clips into a single, synchronized track.
+- **Export Mixed Video** (local videos): Downloads an MP4 with the original video stream copied unchanged and the original audio mixed with the AD track (AAC). Uses the browser's WebCodecs AAC encoder via [Mediabunny](https://mediabunny.dev), so it works in Chrome (macOS/Windows) and recent Safari.
 
 ---
 
@@ -40,8 +41,9 @@ The project is structured as follows:
 │   │   ├── youtube_adapter.ts      # YouTube Iframe Player adapter
 │   │   ├── local_video_adapter.ts  # HTML5 Native Video element adapter
 │   │   ├── ad_audio_manager.ts     # Synchronized AD track playback controller
-│   │   ├── audio_utils.ts          # Pitch/speed shift, silent pads, Crunker helper
-│   │   └── ffmpeg_mixer.ts         # FFmpeg utilities for mixing audio and video
+│   │   ├── audio_utils.ts          # Pitch/speed shift, silent pads, track compilation
+│   │   ├── video_exporter.ts       # VideoExporter interface (Export Mixed Video)
+│   │   └── mediabunny_video_exporter.ts # Mediabunny implementation (MP4 + AAC via WebCodecs)
 │   ├── cli/                # Command-Line Tool
 │   │   ├── index.ts                # Entry point for CLI tool
 │   │   └── video_utils.ts          # Frame extraction via ffmpeg command
@@ -74,8 +76,8 @@ The project is structured as follows:
 │           ├── debug_panel.ts      # Real-time state / log monitor
 │           └── confirm_modal.ts    # Action validation dialogs
 ├── tests/
-│   ├── setup_tests.ts      # CLI reference setup & video dl script
-│   ├── test_data/          # Output and test fixtures
+│   ├── setup_tests.ts      # Downloads & caches the NASA test video
+│   ├── test_data/          # Cached test video (gitignored)
 │   ├── cli/                # Terminal interface test suites
 │   ├── ui/                 # Panel rendering and option persistence tests
 │   └── e2e/                # Puppeteer-driven end-to-end user flow tests
@@ -91,7 +93,7 @@ The project is structured as follows:
 
 ### Prerequisites
 - **Node.js**: Version `20.0.0` or higher.
-- **FFmpeg**: Required on your native system if you want to mix audio and video files directly from the command-line CLI.
+- **FFmpeg** (CLI only; the web app doesn't need it): Required on your native system for two CLI features with local videos: `--mix` (creates `mixed_output.mp4`) and the OpenAI provider (extracts still frames for GPT-4o).
 
 ### Installation
 Clone the repository and install packages:
@@ -147,11 +149,10 @@ The application operates entirely **client-side**; there is no background databa
 All test suites run locally using standard Node.js test runner commands.
 
 ### Initial Test Setup
-Before running the tests, run the setup script to download the test video file and generate reference WebVTT outputs:
+Before running the tests, run the setup script to download the test video (a public-domain NASA clip) into `tests/test_data/` (gitignored). It is cached after the first run, and the `test:*` scripts run it automatically:
 ```bash
 npm run test:setup
 ```
-*(Requires `yt-dlp` to be installed on your machine).*
 
 ### Running the Test Suites
 - **CLI Tests**: Runs headless terminal command tests.
@@ -178,7 +179,7 @@ AD Script Assist includes a CLI tool for headlessly processing videos, generatin
 
 ### Usage
 ```bash
-npx vite-node src/cli/index.ts -v <id_or_url_or_path> -o <path> [options]
+npx tsx src/cli/index.ts -v <id_or_url_or_path> -o <path> [options]
 ```
 
 ### Options
@@ -195,7 +196,7 @@ npx vite-node src/cli/index.ts -v <id_or_url_or_path> -o <path> [options]
 Generate a WebVTT script and individual TTS audio clips for a YouTube video using Gemini:
 ```bash
 export GEMINI_API_KEY="your_api_key"
-npx vite-node src/cli/index.ts -v "https://www.youtube.com/watch?v=W85oD8FEF78" -o ./dist/cli-output -m
+npx tsx src/cli/index.ts -v "https://www.youtube.com/watch?v=W85oD8FEF78" -o ./dist/cli-output -m
 ```
 
 # Disclaimers

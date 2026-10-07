@@ -42,6 +42,7 @@ import { parseAgentResponse } from '../../ai/agent_response_parser';
 import { PROMPTS } from '../../ai/prompts';
 import { DEFAULT_AGENT_MODEL } from '../../core/constants';
 import { extractFramesFromVideoBlob } from '../utils/video_frame_extractor';
+import { getVideoExporter } from '../../av/video_exporter';
 import type { AdSegment, AgentContext, AgentResponse, ConversationEntry, GeminiRequestPlusData, HotkeyConfigEntry } from '../../core/types';
 
 export class AppController {
@@ -599,6 +600,22 @@ export class AppController {
           appState.set('statusMessage', 'No audio track available to export.');
         }
 
+      } else if (type === 'video') {
+        const adTrackUrl = appState.get('compiledAdTrackUrl');
+        if (!localVideoFile || !adTrackUrl) {
+          appState.set('statusMessage', 'Mixed video export needs a local video and a generated AD track.');
+          return;
+        }
+        const exporter = await getVideoExporter();
+        const blob = await exporter.exportMixedVideo({
+          video: localVideoFile,
+          adTrack: await (await fetch(adTrackUrl)).blob(),
+          onProgress: (p) => appState.set('statusMessage', `Exporting video: ${Math.round(p * 100)}%`),
+        });
+        const url = URL.createObjectURL(blob);
+        this.triggerDownload(url, `${videoId}_mixed.${exporter.fileExtension}`);
+        URL.revokeObjectURL(url);
+        appState.set('statusMessage', 'Mixed video export complete.');
       }
     } catch (e: unknown) {
       console.error(e);

@@ -1,3 +1,5 @@
+node_modules/
+.env
 .DS_Store
 dist/
 *.zip
@@ -23,3 +25,7 @@ server/.cache/
 *.db
 *.db-wal
 *.db-shm
+
+# Test artifacts (test video is downloaded by tests/setup_tests.ts)
+tests/test_data/
+tests/**/output_*/

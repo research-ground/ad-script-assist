@@ -14,7 +14,6 @@
  limitations under the License.
  */
 
-#!/usr/bin/env node
 
 import { parseArgs } from 'util';
 import fs from 'fs';
@@ -26,7 +25,7 @@ import { OpenAIRequest } from '../ai/openai_client';
 import { parseAgentResponse } from '../ai/agent_response_parser';
 import { PROMPTS } from '../ai/prompts';
 import { AdScriptParser, isValidWebVtt } from '../core/ad_script_parser';
-import { extractFrames } from './video_utils';
+import { extractFrames, requireFfmpeg } from './video_utils';
 
 async function main() {
   const { values } = parseArgs({
@@ -108,6 +107,9 @@ Options:
     console.error('Error: OPENAI_API_KEY environment variable is not set.');
     process.exit(1);
   }
+
+  if (isLocal && values.mix) requireFfmpeg('for --mix with a local video');
+  if (isLocal && provider === 'openai') requireFfmpeg('to extract frames for OpenAI');
 
   // Generate AD for the whole video, or answer the user's question
   const command = values.question || 'Generate AD for the whole video.';

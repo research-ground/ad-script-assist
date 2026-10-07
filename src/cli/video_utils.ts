@@ -14,10 +14,22 @@
  limitations under the License.
  */
 
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+
+/** Exits with install instructions if ffmpeg isn't on the PATH. */
+export function requireFfmpeg(reason: string) {
+  if (!spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).error) return;
+  console.error(`ffmpeg is required ${reason}, but it wasn't found on your PATH.
+Install it, then try again:
+  macOS:   brew install ffmpeg
+  Ubuntu:  sudo apt install ffmpeg
+  Windows: winget install ffmpeg
+Or use the web app, which doesn't need ffmpeg.`);
+  process.exit(1);
+}
 
 /**
  * Extracts 10 visual frames from a local video file using ffmpeg.
