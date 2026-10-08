@@ -41,7 +41,9 @@ export async function getAI(): Promise<GoogleGenAI> {
         // Optionally save it so it persists on reload
         appState.set('geminiApiKey', apiKey);
       } else {
-        apiKey = appState.get('geminiApiKey');
+        // A key saved in Settings wins; otherwise use the key embedded at
+        // build time (e.g. the GitHub Pages deploy). Empty in local builds.
+        apiKey = appState.get('geminiApiKey') || import.meta.env.VITE_GEMINI_API_KEY || '';
       }
     } else if (typeof process !== 'undefined' && process.env) {
       // Node.js environment

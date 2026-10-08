@@ -84,6 +84,10 @@ The project is structured as follows:
 ├── package.json            # NPM dependencies and run scripts
 ├── tsconfig.json           # TypeScript compilation config
 ├── vite.config.ts          # Vite build tool config
+├── Dockerfile              # Builds the app and serves it with nginx
+├── docker-compose.yml      # `docker compose up` on http://localhost:8080
+├── .github/workflows/
+│   └── pages.yml           # Builds and deploys to GitHub Pages on push to main
 └── Makefile                # Build/Dev shortcuts
 ```
 
@@ -92,8 +96,9 @@ The project is structured as follows:
 ## 3. Setup
 
 ### Prerequisites
-- **Node.js**: Version `20.0.0` or higher.
+- **Node.js**: Version `20.19+` or `22.12+` (required by Vite 8).
 - **FFmpeg** (CLI only; the web app doesn't need it): Required on your native system for two CLI features with local videos: `--mix` (creates `mixed_output.mp4`) and the OpenAI provider (extracts still frames for GPT-4o).
+- **Docker** (optional, only for the [Docker](#docker) setup): a running Docker engine plus the `docker compose` plugin. Either [Docker Desktop](https://www.docker.com/products/docker-desktop/) or, on macOS, [Colima](https://github.com/abiosoft/colima): `brew install docker docker-compose colima && colima start`.
 
 ### Installation
 Clone the repository and install packages:
@@ -108,7 +113,7 @@ npm run dev
 # Or using the Makefile:
 make dev
 ```
-The application will run by default at `http://localhost:5173/`.
+The application will run by default at `http://localhost:3000/`.
 
 ### Production Preview
 To compile the application bundle and preview the optimized build:
@@ -118,6 +123,18 @@ npm run preview
 # Or using the Makefile:
 make serve
 ```
+
+### Docker
+Builds the web app and serves it with nginx at `http://localhost:8080/` (no local Node.js needed):
+```bash
+docker compose up --build
+```
+To embed a default Gemini API key in the build (it is visible in the served JavaScript, so use a restricted key):
+```bash
+VITE_GEMINI_API_KEY=your_key docker compose up --build
+```
+> [!NOTE]
+> Browsers only enable WebCodecs (used by **Export Mixed Video**) on secure origins. `http://localhost:8080` qualifies; reaching the container from another machine over plain `http://` does not, so serve it behind HTTPS for that.
 
 ### App API Configurations
 1. Open the application in your browser.
