@@ -15,7 +15,7 @@
  */
 
 import {GenerateContentResponse, GoogleGenAI, Part} from '@google/genai';
-import {DEFAULT_AGENT_MODEL, ModelName} from '../core/constants';
+import {DEFAULT_AGENT_MODEL, EMBEDDED_GEMINI_API_KEY} from '../core/constants';
 import {GeminiRequestPlusData} from '../core/types';
 import {appState} from '../core/app_state';
 
@@ -33,7 +33,10 @@ if (typeof window !== 'undefined') {
 export async function getAI(): Promise<GoogleGenAI> {
   if (!aiInstance) {
     let apiKey = '';
-    if (typeof window !== 'undefined') {
+    if (EMBEDDED_GEMINI_API_KEY) {
+      // Demo build: always use the embedded key; ?key= and Settings are ignored.
+      apiKey = EMBEDDED_GEMINI_API_KEY;
+    } else if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const urlKey = urlParams.get('api_key') || urlParams.get('key');
       if (urlKey) {
@@ -41,9 +44,7 @@ export async function getAI(): Promise<GoogleGenAI> {
         // Optionally save it so it persists on reload
         appState.set('geminiApiKey', apiKey);
       } else {
-        // A key saved in Settings wins; otherwise use the key embedded at
-        // build time (e.g. the GitHub Pages deploy). Empty in local builds.
-        apiKey = appState.get('geminiApiKey') || import.meta.env.VITE_GEMINI_API_KEY || '';
+        apiKey = appState.get('geminiApiKey');
       }
     } else if (typeof process !== 'undefined' && process.env) {
       // Node.js environment
@@ -93,7 +94,7 @@ class GeminiRequest {
 
   private async callGemini(
     parts: Part[],
-    modelName: ModelName,
+    modelName: string,
     callback: (response: string) => void,
     onError: (error: unknown) => void,
     data?: GeminiRequestPlusData,
@@ -151,17 +152,21 @@ class GeminiRequest {
             'Gemini response received, but text was empty.',
             response,
           );
+          onError(new Error(`Gemini returned an empty response (finish reason: ${candidate.finishReason ?? 'unknown'}).`));
         }
       } else {
         console.warn(
           'Gemini response received, but no candidates or parts found.',
           response,
         );
-        if (response.promptFeedback?.blockReason) {
+        const blockReason = response.promptFeedback?.blockReason;
+        if (blockReason) {
           console.error(
-            `Request was blocked: ${response.promptFeedback.blockReason}`,
+            `Request was blocked: ${blockReason}`,
           );
         }
+        this.state = RequestState.COMPLETED;
+        onError(new Error(blockReason ? `Gemini blocked the request (${blockReason}).` : 'Gemini returned no response.'));
       }
     } catch (error) {
       if (this.isAborted) {
@@ -191,7 +196,7 @@ class GeminiRequest {
     ytUrl: string,
     callback: (response: string) => void,
     onError: (error: unknown) => void,
-    model: ModelName = DEFAULT_AGENT_MODEL,
+    model: string = DEFAULT_AGENT_MODEL,
     data?: GeminiRequestPlusData,
   ) {
     const parts: Part[] = [
@@ -215,7 +220,7 @@ class GeminiRequest {
     videoBlob: Blob,
     callback: (response: string) => void,
     onError: (error: unknown) => void,
-    model: ModelName = DEFAULT_AGENT_MODEL,
+    model: string = DEFAULT_AGENT_MODEL,
     data?: GeminiRequestPlusData,
   ) {
     const arrayBuffer = await videoBlob.arrayBuffer();

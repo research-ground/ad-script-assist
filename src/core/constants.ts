@@ -25,12 +25,20 @@ export enum ModelName {
   GEMINI_3_1_PRO = 'gemini-3.1-pro-preview',
   GEMINI_3_1_FLASH_LITE = 'gemini-3.1-flash-lite-preview',
   GEMINI_3_5_FLASH = 'gemini-3.5-flash',
+  GEMINI_3_8_FLASH = 'gemini-3.8-flash',
+  GEMINI_3_1_FLASH_TTS = 'gemini-3.1-flash-tts-preview',
 }
 
 /** The default Gemini model to use for Text-to-Speech. Using undefined for standard Cloud TTS. */
 export const DEFAULT_TTS_MODEL = undefined;
 /** The default Gemini model to use for the agent chat. */
-export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_5_FLASH;
+export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_8_FLASH;
+/** The default Gemini model for AD speech (used when the provider is Gemini). */
+export const DEFAULT_SPEECH_MODEL = ModelName.GEMINI_3_1_FLASH_TTS;
+
+/** Suggestions for the free-text model fields in Settings (any model name can be typed). */
+export const AGENT_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => !m.includes('tts'));
+export const SPEECH_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => m.includes('tts'));
 
 export const TTS_LANGUAGES = [
   { code: 'en-US', label: 'English (US)' },
@@ -85,3 +93,10 @@ export const GEMINI_WAITING_MESSAGES = [
   'Awaiting Gemini response.',
   'Gemini is still processing.',
 ];
+
+/**
+ * Gemini API key embedded at build time (VITE_GEMINI_API_KEY), e.g. for a
+ * hosted demo. When set, the app is locked to Gemini with this key: users
+ * can't change the key or switch providers. Empty in normal builds and the CLI.
+ */
+export const EMBEDDED_GEMINI_API_KEY: string = import.meta.env?.VITE_GEMINI_API_KEY ?? '';

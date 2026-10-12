@@ -22,7 +22,14 @@ import {getDefaultHotkeyConfigs} from '../hotkeys';
 import {
   retrieveHotkeyConfigsFromDB,
 } from '../storage/db';
-import {TTS_LANGUAGES} from '../../core/constants';
+import {
+  AGENT_MODEL_SUGGESTIONS,
+  DEFAULT_AGENT_MODEL,
+  DEFAULT_SPEECH_MODEL,
+  EMBEDDED_GEMINI_API_KEY,
+  SPEECH_MODEL_SUGGESTIONS,
+  TTS_LANGUAGES,
+} from '../../core/constants';
 import {showConfirm} from './confirm_modal';
 import {appState} from '../../core/app_state';
 import {styles} from './settings_modal_styles';
@@ -49,6 +56,10 @@ export class SettingsModal extends LitElement {
   @state() originalLlmProvider: 'gemini' | 'openai' = 'gemini';
   @state() currentLanguage: string = '';
   @state() originalLanguage: string = '';
+  @state() currentAgentModel: string = '';
+  @state() originalAgentModel: string = '';
+  @state() currentSpeechModel: string = '';
+  @state() originalSpeechModel: string = '';
   @state() private isLoadingConfigs = true;
 
   private defaultCombos = new Map<string, string | undefined>();
@@ -160,6 +171,10 @@ export class SettingsModal extends LitElement {
       this.originalLlmProvider = this.currentLlmProvider;
       this.currentLanguage = appState.get('ttsLanguage');
       this.originalLanguage = this.currentLanguage;
+      this.currentAgentModel = appState.get('agentModel');
+      this.originalAgentModel = this.currentAgentModel;
+      this.currentSpeechModel = appState.get('speechModel');
+      this.originalSpeechModel = this.currentSpeechModel;
     } finally {
       this.isLoadingConfigs = false;
     }
@@ -180,7 +195,9 @@ export class SettingsModal extends LitElement {
       this.currentApiKey !== this.originalApiKey ||
       this.currentOpenAiApiKey !== this.originalOpenAiApiKey ||
       this.currentLlmProvider !== this.originalLlmProvider ||
-      this.currentLanguage !== this.originalLanguage
+      this.currentLanguage !== this.originalLanguage ||
+      this.currentAgentModel !== this.originalAgentModel ||
+      this.currentSpeechModel !== this.originalSpeechModel
     );
   }
 
@@ -198,6 +215,8 @@ export class SettingsModal extends LitElement {
         openaiApiKey: this.currentOpenAiApiKey,
         llmProvider: this.currentLlmProvider,
         ttsLanguage: this.currentLanguage,
+        agentModel: this.currentAgentModel,
+        speechModel: this.currentSpeechModel,
         hotkeys: changedHotkeys.length > 0 ? this.currentHotkeys : undefined,
       });
 
@@ -232,6 +251,30 @@ export class SettingsModal extends LitElement {
     );
   }
 
+  /** Free-text model field; blank means "use the default". */
+  private renderModelInput(id: string, label: string, value: string,
+      defaultModel: string, suggestions: string[], onInput: (v: string) => void) {
+    return html`
+      <div>
+        <label for=${id}>${label}:</label>
+        <input
+          id=${id}
+          type="text"
+          list="${id}-suggestions"
+          style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;"
+          .value=${value}
+          @input=${(e: Event) => {
+            if (e.target instanceof HTMLInputElement) onInput(e.target.value);
+          }}
+          placeholder="${defaultModel} (default)"
+        />
+        <datalist id="${id}-suggestions">
+          ${suggestions.map((m) => html`<option value=${m}></option>`)}
+        </datalist>
+      </div>
+    `;
+  }
+
   override render() {
     return html`
       <dialog>
@@ -256,6 +299,9 @@ export class SettingsModal extends LitElement {
                 <div class="section-header">
                   <h2>AI Provider</h2>
                 </div>
+              ${EMBEDDED_GEMINI_API_KEY ? html`
+              <p style="padding: 10px; margin: 0;">This demo uses Google Gemini with a preconfigured API key.</p>
+              ` : html`
               <div class="api-key-container" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
                 <div>
                   <label for="provider-select">Provider:</label>
@@ -302,7 +348,13 @@ export class SettingsModal extends LitElement {
                     placeholder="Enter your OpenAI API Key"
                   />
                 </div>
+
+                ${this.renderModelInput('agent-model-input', 'Gemini model', this.currentAgentModel,
+                  DEFAULT_AGENT_MODEL, AGENT_MODEL_SUGGESTIONS, (v) => { this.currentAgentModel = v; })}
+                ${this.renderModelInput('speech-model-input', 'Gemini speech model', this.currentSpeechModel,
+                  DEFAULT_SPEECH_MODEL, SPEECH_MODEL_SUGGESTIONS, (v) => { this.currentSpeechModel = v; })}
               </div>
+              `}
             </div>
 
             <div class="section">

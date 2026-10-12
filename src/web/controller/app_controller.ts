@@ -39,8 +39,9 @@ import { formatTimeForScreenReader } from '../../core/time_utils';
 import { GeminiRequest } from '../../ai/gemini_client';
 import { OpenAIRequest } from '../../ai/openai_client';
 import { parseAgentResponse } from '../../ai/agent_response_parser';
+import { describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
-import { DEFAULT_AGENT_MODEL } from '../../core/constants';
+import { DEFAULT_AGENT_MODEL, EMBEDDED_GEMINI_API_KEY } from '../../core/constants';
 import { extractFramesFromVideoBlob } from '../utils/video_frame_extractor';
 import { getVideoExporter } from '../../av/video_exporter';
 import type { AdSegment, AgentContext, AgentResponse, ConversationEntry, GeminiRequestPlusData, HotkeyConfigEntry } from '../../core/types';
@@ -454,7 +455,7 @@ export class AppController {
       }
       this.activeRequest = request;
 
-      const model = DEFAULT_AGENT_MODEL;
+      const model = appState.get('agentModel') || DEFAULT_AGENT_MODEL;
       const data: GeminiRequestPlusData = {
         videoId,
         adTextBefore: context.adScriptText || '',
@@ -507,7 +508,7 @@ export class AppController {
 
         } catch (e) {
           console.error('Failed to parse AI response', e, 'Raw:', text);
-          this.appendAgentMessage('Error: Could not parse response from agent.', videoId, silent);
+          this.appendAgentMessage('⚠️ Error: Could not parse response from agent.', videoId, false);
         } finally {
           this.activeRequest = null;
           appState.set('isAgentResponding', false);
@@ -516,7 +517,11 @@ export class AppController {
 
       const onError = (error: unknown) => {
         console.error('AI Error:', error);
-        this.appendAgentMessage('An error occurred while contacting the agent.', videoId, silent);
+        const source = provider === 'openai' ? 'OpenAI' : model;
+        const hint = provider === 'gemini' && !EMBEDDED_GEMINI_API_KEY
+          ? ' You can try a different model in Settings.' : '';
+        this.appendAgentMessage(
+          `⚠️ Error from ${source}: ${describeError(error).replace(/\.?$/, '.')}${hint}`, videoId, false);
         this.activeRequest = null;
         appState.set('isAgentResponding', false);
       };
@@ -538,8 +543,7 @@ export class AppController {
 
     } catch (e) {
       console.error('AI Request failed', e);
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      this.appendAgentMessage(`Sorry, an unexpected error occurred: ${errorMsg}`, videoId, silent);
+      this.appendAgentMessage(`⚠️ Sorry, an unexpected error occurred: ${describeError(e)}`, videoId, false);
       this.activeRequest = null;
       appState.set('isAgentResponding', false);
     }
@@ -667,6 +671,8 @@ export class AppController {
     llmProvider?: 'gemini' | 'openai';
     ttsLanguage?: string;
     ttsVoice?: string;
+    agentModel?: string;
+    speechModel?: string;
     hotkeys?: HotkeyConfigEntry[];
   }) {
     if (settings.geminiApiKey !== undefined) {
@@ -683,6 +689,12 @@ export class AppController {
     }
     if (settings.ttsVoice !== undefined) {
       appState.set('ttsVoice', settings.ttsVoice);
+    }
+    if (settings.agentModel !== undefined) {
+      appState.set('agentModel', settings.agentModel.trim());
+    }
+    if (settings.speechModel !== undefined) {
+      appState.set('speechModel', settings.speechModel.trim());
     }
 
     if (settings.hotkeys) {
@@ -704,6 +716,8 @@ export class AppController {
     appState.set('llmProvider', 'gemini');
     appState.set('ttsLanguage', 'en-US');
     appState.set('ttsVoice', 'Aoede');
+    appState.set('agentModel', '');
+    appState.set('speechModel', '');
 
     window.dispatchEvent(new CustomEvent('hotkeys-updated'));
   }

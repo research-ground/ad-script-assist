@@ -18,6 +18,7 @@ import {ttsCache} from '../web/storage/tts_cache';
 import {getAI} from './gemini_client';
 import {getOpenAIApiKey} from './openai_client';
 import {appState} from '../core/app_state';
+import {DEFAULT_SPEECH_MODEL} from '../core/constants';
 
 /**
  * Generates Text-to-Speech audio from the provided text.
@@ -75,7 +76,7 @@ export async function generateTTS(
       } else {
         const ai = await getAI();
         const response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-tts-preview',
+          model: appState.get('speechModel') || DEFAULT_SPEECH_MODEL,
           contents: text,
           config: {
             responseModalities: ['AUDIO'],

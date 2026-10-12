@@ -14,17 +14,20 @@
  limitations under the License.
  */
 
-import { AdSegment } from '../core/types';
+import { AdSegment, ConversationEntry } from '../core/types';
 import { appState } from '../core/app_state';
 import { AdGenerator } from '../ai/ad_generator';
+import { describeError } from '../ai/describe_error';
 import { compileADAudioTrack } from './audio_utils';
-import { storeAdSegmentsToDB } from '../web/storage/db';
+import { addConversationEntryToDB, storeAdSegmentsToDB } from '../web/storage/db';
 
 export class AdAudioManager {
   private adGenerator = AdGenerator.getInstance();
   private audioGenerationPromise: Promise<void> | null = null;
   private hasPendingChange = false;
   private isProcessingAudio = false;
+  private failedCount = 0;
+  private lastError: unknown = null;
 
   constructor() {
     appState.subscribe('isAgentResponding', (isResponding) => {
@@ -98,10 +101,16 @@ export class AdAudioManager {
       }
 
       // Process segments in small batches
+      this.failedCount = 0;
+      this.lastError = null;
       const CONCURRENCY_LIMIT = 3;
       for (let i = 0; i < workingSegments.length; i += CONCURRENCY_LIMIT) {
         const batch = workingSegments.slice(i, i + CONCURRENCY_LIMIT);
         await Promise.all(batch.map((seg) => this.generateAudioForSingleSegment(seg)));
+      }
+      if (this.failedCount > 0) {
+        this.postErrorToChat(currentVideoId,
+          `⚠️ Couldn't generate audio for ${this.failedCount} segment(s): ${describeError(this.lastError)}`);
       }
 
       appState.set('adSegments', workingSegments);
@@ -125,9 +134,23 @@ export class AdAudioManager {
       this.isProcessingAudio = false;
       appState.set('isAdAudioGenerating', false);
       if (!this.hasPendingChange) {
-        appState.set('statusMessage', 'Audio generation complete.');
+        appState.set('statusMessage', this.failedCount > 0
+          ? `Audio generation failed for ${this.failedCount} segment(s).`
+          : 'Audio generation complete.');
       }
     }
+  }
+
+  private postErrorToChat(videoId: string, message: string) {
+    const entry: ConversationEntry = {
+      type: 'agent',
+      message,
+      timestamp: new Date().toISOString(),
+      trashed: false,
+      videoId,
+    };
+    appState.set('conversationLog', [...(appState.get('conversationLog') || []), entry]);
+    void addConversationEntryToDB(entry);
   }
 
   private async generateAudioForSingleSegment(seg: AdSegment) {
@@ -148,6 +171,8 @@ export class AdAudioManager {
       });
     } catch (error) {
       console.error('[AdAudioManager] Failed to generate audio for segment:', error);
+      this.failedCount++;
+      this.lastError = error;
       Object.assign(seg, {
         audioData: undefined,
         generationFailed: true,

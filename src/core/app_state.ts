@@ -20,6 +20,7 @@
  */
 
 import {AdSegment, VideoPlayerApi, ConversationEntry} from './types';
+import {EMBEDDED_GEMINI_API_KEY} from './constants';
 
 /** Supported application states. */
 export interface AppState {
@@ -56,6 +57,8 @@ export interface AppState {
   openaiApiKey: string;
   llmProvider: 'gemini' | 'openai';
   ttsLanguage: string;
+  agentModel: string; // '' = DEFAULT_AGENT_MODEL
+  speechModel: string; // '' = DEFAULT_SPEECH_MODEL
   
   // Project Settings (Saved per-video)
   ttsVoice: string;
@@ -69,7 +72,7 @@ export interface AppState {
 
 type StateListener<T> = (value: T) => void;
 
-const USER_SETTINGS_KEYS = ['geminiApiKey', 'openaiApiKey', 'llmProvider', 'ttsLanguage'] as const;
+const USER_SETTINGS_KEYS = ['geminiApiKey', 'openaiApiKey', 'llmProvider', 'ttsLanguage', 'agentModel', 'speechModel'] as const;
 const PROJECT_SETTINGS_KEYS = [
   'currentVideoId',
   'ttsVoice',
@@ -111,6 +114,8 @@ class AppStateManager {
     openaiApiKey: '',
     llmProvider: 'gemini',
     ttsLanguage: 'en-US',
+    agentModel: '',
+    speechModel: '',
     
     ttsVoice: 'Aoede',
     speakAdText: true,
@@ -129,7 +134,12 @@ class AppStateManager {
       this.state.geminiApiKey = localStorage.getItem('userSettings_geminiApiKey') || '';
       this.state.openaiApiKey = localStorage.getItem('userSettings_openaiApiKey') || '';
       this.state.llmProvider = (localStorage.getItem('userSettings_llmProvider') as 'gemini' | 'openai') || 'gemini';
+      if (EMBEDDED_GEMINI_API_KEY) this.state.llmProvider = 'gemini'; // Demo build: locked to Gemini.
       this.state.ttsLanguage = localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
+      if (!EMBEDDED_GEMINI_API_KEY) { // Demo build: always the default models.
+        this.state.agentModel = localStorage.getItem('userSettings_agentModel') || '';
+        this.state.speechModel = localStorage.getItem('userSettings_speechModel') || '';
+      }
       
       // Load active project settings immediately
       const raw = localStorage.getItem('projectSettings_active');
