@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: all build dev serve
+.PHONY: all build dev serve make-for-aistudio
 
 # Default target
 all: build
@@ -31,3 +31,9 @@ dev:
 serve: build
 	@echo "Starting Vite production preview..."
 	npx vite preview
+
+# Create a clean zip archive of tracked files for Google AI Studio import
+make-for-aistudio:
+	@echo "Creating clean archive ad-script-assist-aistudio.zip for Google AI Studio..."
+	git archive --format=zip --output=ad-script-assist-aistudio.zip HEAD
+	@ls -lh ad-script-assist-aistudio.zip

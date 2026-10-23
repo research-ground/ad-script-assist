@@ -136,6 +136,17 @@ VITE_GEMINI_API_KEY=your_key docker compose up --build
 > [!NOTE]
 > Browsers only enable WebCodecs (used by **Export Mixed Video**) on secure origins. `http://localhost:8080` qualifies; reaching the container from another machine over plain `http://` does not, so serve it behind HTTPS for that.
 
+### Importing into Google AI Studio
+To import and run AD Script Assist inside [Google AI Studio](https://aistudio.google.com/):
+1. Generate a clean zip archive of the repository's tracked files (excluding `node_modules/`, `dist/`, and `.git/`):
+   ```bash
+   make make-for-aistudio
+   ```
+   This creates `ad-script-assist-aistudio.zip` in the repository root.
+2. Open [Google AI Studio](https://aistudio.google.com/) (**Build**) and start a blank project by typing `"blank project"` in the prompt.
+3. When the project opens, **stop the agent** immediately (it will begin creating template files even though you requested a blank project).
+4. Add/attach `ad-script-assist-aistudio.zip` to the prompt and prompt the agent: `"import files"`.
+
 ### App API Configurations
 1. Open the application in your browser.
 2. Click the **Settings** icon in the top header.
