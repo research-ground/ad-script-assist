@@ -18,6 +18,7 @@ import {GenerateContentResponse, GoogleGenAI, Part} from '@google/genai';
 import {DEFAULT_AGENT_MODEL, getInjectedGeminiApiKey} from '../core/constants';
 import {GeminiRequestPlusData} from '../core/types';
 import {appState} from '../core/app_state';
+import {validateApiKeyForProvider} from './describe_error';
 
 
 let aiInstance: GoogleGenAI | null = null;
@@ -51,8 +52,8 @@ export function resolveGeminiApiKey(): string {
   return '';
 }
 
-export async function getAI(): Promise<GoogleGenAI> {
-  const resolvedKey = resolveGeminiApiKey() || 'dummy-key-for-tests';
+export async function getAI(apiKeyOverride?: string): Promise<GoogleGenAI> {
+  const resolvedKey = (apiKeyOverride?.trim() || resolveGeminiApiKey()) || 'dummy-key-for-tests';
   if (!aiInstance || aiInstanceKey !== resolvedKey) {
     aiInstanceKey = resolvedKey;
     aiInstance = new GoogleGenAI({
@@ -112,7 +113,15 @@ class GeminiRequest {
 
 
     try {
-      const ai = await getAI();
+      const resolvedKey = resolveGeminiApiKey();
+      if (!resolvedKey.trim()) {
+        throw new Error('No Gemini API key configured. Open Settings to add one.');
+      }
+      const keyMismatch = validateApiKeyForProvider(resolvedKey, 'gemini', 'VLM');
+      if (keyMismatch) {
+        throw new Error(keyMismatch);
+      }
+      const ai = await getAI(resolvedKey);
       // We explicitly do NOT enforce JSON schema or use responseMimeType: 'application/json'
       // because it can sometimes cause the model to perform poorly, hallucinate, or fail
       // on complex multimodal inputs. Instead, we use a robust client-side parser

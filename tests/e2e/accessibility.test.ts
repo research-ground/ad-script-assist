@@ -27,8 +27,9 @@ test('Accessibility: All controls are reachable via Tab key', async (t) => {
     // 1. Wait for page to load
     await page.waitForSelector('main-page', { visible: true, timeout: 5000 });
 
-    // Mock a loaded video so that all video controls become enabled
+    // Mock a loaded video and VLM API key so that all controls become enabled
     await page.evaluate(() => {
+      (window as any).appState.set('geminiApiKey', 'test_key');
       (window as any).appState.set('currentVideoId', 'test_vid');
       (window as any).appState.set('videoType', 'local');
     });
@@ -97,7 +98,7 @@ test('Accessibility: All controls are reachable via Tab key', async (t) => {
     // Assert Video Controls
     assert.ok(focusedElements.has('Play or pause video'), 'Play/Pause button should be reachable via Tab');
     assert.ok(focusedElements.has('speakToggle'), 'Play Audio Description toggle should be reachable via Tab');
-    assert.ok(focusedElements.has('(Re)Generate AD'), 'Generate AD button should be reachable via Tab');
+    assert.ok(focusedElements.has('Generate AD'), 'Generate AD button should be reachable via Tab');
     
     // Assert Editor and Chat
     assert.ok(focusedElements.has('Agent Command Input'), 'Agent chat input should be reachable via Tab');

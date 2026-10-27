@@ -266,7 +266,7 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    const openaiInput = await page.locator('main-page >>> settings-modal >>> #openai-api-key-input').waitHandle();
+    const openaiInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
     await openaiInput.type(openaiKey);
 
     await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');

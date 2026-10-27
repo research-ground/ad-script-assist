@@ -50,10 +50,12 @@ export class SettingsModal extends LitElement {
   @state() originalHotkeys: HotkeyConfigEntry[] = [];
   @state() currentApiKey: string = '';
   @state() originalApiKey: string = '';
-  @state() currentOpenAiApiKey: string = '';
-  @state() originalOpenAiApiKey: string = '';
-  @state() currentLlmProvider: 'gemini' | 'openai' = 'gemini';
-  @state() originalLlmProvider: 'gemini' | 'openai' = 'gemini';
+  @state() currentLlmProvider: 'gemini' | 'openai' | 'none' = 'gemini';
+  @state() originalLlmProvider: 'gemini' | 'openai' | 'none' = 'gemini';
+  @state() currentTtsProvider: 'gemini' | 'openai' | 'kokoro' = 'gemini';
+  @state() originalTtsProvider: 'gemini' | 'openai' | 'kokoro' = 'gemini';
+  @state() currentTtsApiKey: string = '';
+  @state() originalTtsApiKey: string = '';
   @state() currentLanguage: string = '';
   @state() originalLanguage: string = '';
   @state() currentAgentModel: string = '';
@@ -163,12 +165,14 @@ export class SettingsModal extends LitElement {
       this.currentHotkeys = await retrieveHotkeyConfigsFromDB();
       this.originalHotkeys = structuredClone(this.currentHotkeys);
       
-      this.currentApiKey = appState.get('geminiApiKey');
+      this.currentApiKey = appState.get('geminiApiKey') || appState.get('openaiApiKey') || '';
       this.originalApiKey = this.currentApiKey;
-      this.currentOpenAiApiKey = appState.get('openaiApiKey');
-      this.originalOpenAiApiKey = this.currentOpenAiApiKey;
-      this.currentLlmProvider = appState.get('llmProvider');
+      this.currentLlmProvider = appState.get('llmProvider') || 'gemini';
       this.originalLlmProvider = this.currentLlmProvider;
+      this.currentTtsProvider = appState.get('ttsProvider') || 'gemini';
+      this.originalTtsProvider = this.currentTtsProvider;
+      this.currentTtsApiKey = appState.get('ttsApiKey') || '';
+      this.originalTtsApiKey = this.currentTtsApiKey;
       this.currentLanguage = appState.get('ttsLanguage');
       this.originalLanguage = this.currentLanguage;
       this.currentAgentModel = appState.get('agentModel');
@@ -193,8 +197,9 @@ export class SettingsModal extends LitElement {
       JSON.stringify(this.currentHotkeys) !==
         JSON.stringify(this.originalHotkeys) ||
       this.currentApiKey !== this.originalApiKey ||
-      this.currentOpenAiApiKey !== this.originalOpenAiApiKey ||
       this.currentLlmProvider !== this.originalLlmProvider ||
+      this.currentTtsProvider !== this.originalTtsProvider ||
+      this.currentTtsApiKey !== this.originalTtsApiKey ||
       this.currentLanguage !== this.originalLanguage ||
       this.currentAgentModel !== this.originalAgentModel ||
       this.currentSpeechModel !== this.originalSpeechModel
@@ -212,8 +217,10 @@ export class SettingsModal extends LitElement {
 
       await this.controller.saveSettings({
         geminiApiKey: this.currentApiKey,
-        openaiApiKey: this.currentOpenAiApiKey,
+        openaiApiKey: this.currentApiKey,
         llmProvider: this.currentLlmProvider,
+        ttsProvider: this.currentTtsProvider,
+        ttsApiKey: this.currentTtsApiKey,
         ttsLanguage: this.currentLanguage,
         agentModel: this.currentAgentModel,
         speechModel: this.currentSpeechModel,
@@ -297,91 +304,122 @@ export class SettingsModal extends LitElement {
             <div class="content-body">
               <div class="section">
                 <div class="section-header">
-                  <h2>AI Provider</h2>
+                  <h2>Vision-Language Model (VLM)</h2>
                 </div>
               ${getInjectedGeminiApiKey() ? html`
               <p style="padding: 10px; margin: 0;">This app is using a preconfigured Google Gemini API key.</p>
               ` : html`
               <div class="api-key-container" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
                 <div>
-                  <label for="provider-select">Provider:</label>
+                  <label for="provider-select">VLM Provider:</label>
                   <select id="provider-select" 
                     style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;"
                     @change=${(e: Event) => {
                       if (e.target instanceof HTMLSelectElement) {
-                        this.currentLlmProvider = e.target.value as 'gemini' | 'openai';
+                        this.currentLlmProvider = e.target.value as 'gemini' | 'openai' | 'none';
                       }
                     }}>
                     <option value="gemini" ?selected=${this.currentLlmProvider === 'gemini'}>Google Gemini</option>
                     <option value="openai" ?selected=${this.currentLlmProvider === 'openai'}>OpenAI ChatGPT</option>
+                    <option value="none" ?selected=${this.currentLlmProvider === 'none'}>None (Manual Editing Only)</option>
                   </select>
                 </div>
                 
                 <div>
-                  <label for="api-key-input">Gemini API Key:</label>
+                  <label for="api-key-input">VLM API Key:</label>
                   <input
                     id="api-key-input"
                     type="password"
-                    aria-describedby="gemini-key-help"
+                    aria-describedby="vlm-key-help"
                     style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
                     .value=${this.currentApiKey}
+                    ?disabled=${this.currentLlmProvider === 'none'}
                     @input=${(e: Event) => {
                       if (e.target instanceof HTMLInputElement) {
                         this.currentApiKey = e.target.value;
                       }
                     }}
-                    placeholder="Enter your Gemini API Key"
+                    placeholder=${this.currentLlmProvider === 'none'
+                      ? 'No API key required when VLM is None'
+                      : 'Enter your Gemini or OpenAI API Key'}
                   />
-                  <div id="gemini-key-help" class="help-text" style="margin-top: 4px;">
-                    Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Stored locally in your browser.
+                  <div id="vlm-key-help" class="help-text" style="margin-top: 4px;">
+                    Get a Gemini key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> or an OpenAI key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>. Stored locally in your browser.
                   </div>
                 </div>
 
-                <div>
-                  <label for="openai-api-key-input">OpenAI API Key:</label>
-                  <input
-                    id="openai-api-key-input"
-                    type="password"
-                    aria-describedby="openai-key-help"
-                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
-                    .value=${this.currentOpenAiApiKey}
-                    @input=${(e: Event) => {
-                      if (e.target instanceof HTMLInputElement) {
-                        this.currentOpenAiApiKey = e.target.value;
-                      }
-                    }}
-                    placeholder="Enter your OpenAI API Key"
-                  />
-                  <div id="openai-key-help" class="help-text" style="margin-top: 4px;">
-                    Get a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>. Stored locally in your browser.
-                  </div>
-                </div>
-
-                ${this.renderModelInput('agent-model-input', 'Gemini model', this.currentAgentModel,
-                  DEFAULT_AGENT_MODEL, AGENT_MODEL_SUGGESTIONS, (v) => { this.currentAgentModel = v; })}
-                ${this.renderModelInput('speech-model-input', 'Gemini speech model', this.currentSpeechModel,
-                  DEFAULT_SPEECH_MODEL, SPEECH_MODEL_SUGGESTIONS, (v) => { this.currentSpeechModel = v; })}
+                ${this.currentLlmProvider === 'gemini'
+                  ? this.renderModelInput('agent-model-input', 'Gemini model', this.currentAgentModel,
+                      DEFAULT_AGENT_MODEL, AGENT_MODEL_SUGGESTIONS, (v) => { this.currentAgentModel = v; })
+                  : ''}
               </div>
               `}
             </div>
 
             <div class="section">
               <div class="section-header">
-                <h2>Text-to-Speech</h2>
+                <h2>Text-to-Speech (TTS)</h2>
               </div>
-              <div class="api-key-container" style="padding: 10px;">
-                <label for="language-select">Voice Language:</label>
-                <select
-                  id="language-select"
-                  style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; background-color: white;"
-                  @change=${(e: Event) => {
-                    if (e.target instanceof HTMLSelectElement) {
-                      this.currentLanguage = e.target.value;
-                    }
-                  }}
-                >
-                  ${TTS_LANGUAGES.map((lang) => html`<option value="${lang.code}" ?selected=${this.currentLanguage === lang.code}>${lang.label}</option>`)}
-                </select>
+              <div class="api-key-container" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
+                <div>
+                  <label for="tts-provider-select">TTS Engine:</label>
+                  <select
+                    id="tts-provider-select"
+                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; background-color: white;"
+                    @change=${(e: Event) => {
+                      if (e.target instanceof HTMLSelectElement) {
+                        this.currentTtsProvider = e.target.value as 'gemini' | 'openai' | 'kokoro';
+                      }
+                    }}
+                  >
+                    <option value="gemini" ?selected=${this.currentTtsProvider === 'gemini'}>Google Gemini TTS</option>
+                    <option value="openai" ?selected=${this.currentTtsProvider === 'openai'}>OpenAI TTS</option>
+                    <option value="kokoro" ?selected=${this.currentTtsProvider === 'kokoro'}>Kokoro (Local Browser TTS)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="tts-api-key-input">TTS API Key:</label>
+                  <input
+                    id="tts-api-key-input"
+                    type="password"
+                    aria-describedby="tts-key-help"
+                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                    .value=${this.currentTtsApiKey}
+                    ?disabled=${this.currentTtsProvider === 'kokoro' || (this.currentTtsProvider === 'gemini' && Boolean(getInjectedGeminiApiKey()))}
+                    @input=${(e: Event) => {
+                      if (e.target instanceof HTMLInputElement) {
+                        this.currentTtsApiKey = e.target.value;
+                      }
+                    }}
+                    placeholder=${this.currentTtsProvider === 'kokoro'
+                      ? 'No API key required for Kokoro (leave blank)'
+                      : 'Enter TTS API Key (or leave blank to use VLM key)'}
+                  />
+                  <div id="tts-key-help" class="help-text" style="margin-top: 4px;">
+                    Leave blank for Kokoro (runs locally in your browser) or to reuse your VLM API key.
+                  </div>
+                </div>
+
+                ${this.currentTtsProvider === 'gemini' && !getInjectedGeminiApiKey()
+                  ? this.renderModelInput('speech-model-input', 'Gemini speech model', this.currentSpeechModel,
+                      DEFAULT_SPEECH_MODEL, SPEECH_MODEL_SUGGESTIONS, (v) => { this.currentSpeechModel = v; })
+                  : ''}
+
+                <div>
+                  <label for="language-select">Voice Language:</label>
+                  <select
+                    id="language-select"
+                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; background-color: white;"
+                    @change=${(e: Event) => {
+                      if (e.target instanceof HTMLSelectElement) {
+                        this.currentLanguage = e.target.value;
+                      }
+                    }}
+                  >
+                    ${TTS_LANGUAGES.map((lang) => html`<option value="${lang.code}" ?selected=${this.currentLanguage === lang.code}>${lang.label}</option>`)}
+                  </select>
+                </div>
               </div>
             </div>
 

@@ -19,7 +19,14 @@ import {getAI, resolveGeminiApiKey} from './gemini_client';
 import {getOpenAIApiKey} from './openai_client';
 import {generateKokoroPcm} from './kokoro_tts';
 import {appState} from '../core/app_state';
-import {DEFAULT_KOKORO_VOICE, DEFAULT_SPEECH_MODEL, isKokoroVoice} from '../core/constants';
+import {
+  DEFAULT_KOKORO_VOICE,
+  DEFAULT_SPEECH_MODEL,
+  isGeminiVoice,
+  isKokoroVoice,
+  isOpenAIVoice,
+} from '../core/constants';
+import {describeError, validateApiKeyForProvider} from './describe_error';
 
 export interface TtsFallbackListener {
   (reason: unknown, fallbackVoice: string): void;
@@ -61,7 +68,12 @@ export async function generateTTS(
   speed: number = 1.0,
   provider?: string,
 ): Promise<string> {
-  if (isKokoroVoice(voiceName)) {
+  const ttsProvider =
+    (provider as 'gemini' | 'openai' | 'kokoro' | undefined) ||
+    (typeof window !== 'undefined' ? appState.get('ttsProvider') : 'gemini') ||
+    'gemini';
+
+  if (ttsProvider === 'kokoro' || isKokoroVoice(voiceName)) {
     return synthesizeWithKokoro(text, voiceName, speed);
   }
 
@@ -70,16 +82,28 @@ export async function generateTTS(
     return blobToBase64(cachedBlob);
   }
 
-  const llmProvider = provider || (typeof window !== 'undefined' ? appState.get('llmProvider') : 'gemini') || 'gemini';
+  const explicitTtsKey =
+    typeof window !== 'undefined' ? (appState.get('ttsApiKey') || '').trim() : '';
+  const resolvedTtsKey =
+    explicitTtsKey ||
+    (ttsProvider === 'openai'
+      ? (getOpenAIApiKey() || '').trim()
+      : (resolveGeminiApiKey() || '').trim());
 
-  // If no API key is configured for the selected cloud provider, immediately fall back to local Kokoro TTS.
-  const hasCloudKey = llmProvider === 'openai'
-    ? Boolean(getOpenAIApiKey()?.trim())
-    : Boolean(resolveGeminiApiKey()?.trim());
+  // If no API key is configured for the selected cloud TTS provider, immediately fall back to local Kokoro TTS.
+  if (!resolvedTtsKey) {
+    console.info(`[TTS] No ${ttsProvider} TTS API key configured; using local Kokoro voice (${DEFAULT_KOKORO_VOICE}).`);
+    onCloudFallbackListener?.(new Error(`No ${ttsProvider} TTS API key configured`), DEFAULT_KOKORO_VOICE);
+    return synthesizeWithKokoro(text, DEFAULT_KOKORO_VOICE, speed);
+  }
 
-  if (!hasCloudKey) {
-    console.info(`[TTS] No ${llmProvider} API key configured; using local Kokoro voice (${DEFAULT_KOKORO_VOICE}).`);
-    onCloudFallbackListener?.(new Error(`No ${llmProvider} API key configured`), DEFAULT_KOKORO_VOICE);
+  const keyMismatch = validateApiKeyForProvider(resolvedTtsKey, ttsProvider, 'TTS');
+  if (keyMismatch) {
+    console.warn(`[TTS] ${keyMismatch}`);
+    if (typeof window !== 'undefined') {
+      appState.set('statusMessage', `${keyMismatch} Falling back to local Kokoro voice.`);
+    }
+    onCloudFallbackListener?.(new Error(keyMismatch), DEFAULT_KOKORO_VOICE);
     return synthesizeWithKokoro(text, DEFAULT_KOKORO_VOICE, speed);
   }
 
@@ -95,23 +119,28 @@ export async function generateTTS(
         console.log(`[TTS Cloud] Requesting cloud audio generation for text: "${text}"`);
       }
 
-      if (llmProvider === 'openai') {
-        const apiKey = getOpenAIApiKey();
+      if (ttsProvider === 'openai') {
+        const openAiVoice = isOpenAIVoice(voiceName) ? voiceName : 'alloy';
         const response = await fetch('https://api.openai.com/v1/audio/speech', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${resolvedTtsKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             model: 'tts-1',
-            voice: 'alloy',
+            voice: openAiVoice,
             input: text,
           }),
         });
 
         if (!response.ok) {
-          throw new Error(`OpenAI TTS request failed: ${response.statusText}`);
+          const errText = await response.text().catch(() => '');
+          throw new Error(
+            errText
+              ? `OpenAI TTS request failed (${response.status}): ${errText}`
+              : `OpenAI TTS request failed (${response.status}): ${response.statusText}`,
+          );
         }
 
         const arrayBuffer = await response.arrayBuffer();
@@ -120,7 +149,8 @@ export async function generateTTS(
         console.log(`[TTS Cloud] Successfully generated and cached audio for: "${text}"`);
         return blobToBase64(audioBlob);
       } else {
-        const ai = await getAI();
+        const geminiVoice = isGeminiVoice(voiceName) ? voiceName : 'Aoede';
+        const ai = await getAI(resolvedTtsKey);
         const response = await ai.models.generateContent({
           model: appState.get('speechModel') || DEFAULT_SPEECH_MODEL,
           contents: text,
@@ -128,7 +158,7 @@ export async function generateTTS(
             responseModalities: ['AUDIO'],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
+                prebuiltVoiceConfig: { voiceName: geminiVoice },
               },
             },
           },
@@ -171,6 +201,10 @@ export async function generateTTS(
     `[TTS Cloud] Cloud TTS failed after retries; falling back to local Kokoro voice (${DEFAULT_KOKORO_VOICE}):`,
     lastCloudError,
   );
+  if (typeof window !== 'undefined' && lastCloudError) {
+    const errText = describeError(lastCloudError, ttsProvider);
+    appState.set('statusMessage', `Cloud TTS failed (${errText}). Using local Kokoro voice.`);
+  }
   onCloudFallbackListener?.(lastCloudError, DEFAULT_KOKORO_VOICE);
   return synthesizeWithKokoro(text, DEFAULT_KOKORO_VOICE, speed);
 }

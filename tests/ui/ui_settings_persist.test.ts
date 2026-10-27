@@ -36,14 +36,14 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
   await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
   await page.waitForSelector('main-page >>> settings-modal >>> #language-select', { timeout: 5000 });
   
-  // Change API Keys
+  // Change VLM and TTS API Keys
   const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
   await apiKeyInput.evaluate((el: HTMLInputElement) => el.value = ''); // clear it
   await apiKeyInput.type('TEST_API_KEY_123');
   
-  const openaiApiKeyInput = await page.locator('main-page >>> settings-modal >>> #openai-api-key-input').waitHandle();
-  await openaiApiKeyInput.evaluate((el: HTMLInputElement) => el.value = ''); // clear it
-  await openaiApiKeyInput.type('TEST_OPENAI_KEY_456');
+  const ttsApiKeyInput = await page.locator('main-page >>> settings-modal >>> #tts-api-key-input').waitHandle();
+  await ttsApiKeyInput.evaluate((el: HTMLInputElement) => el.value = ''); // clear it
+  await ttsApiKeyInput.type('TEST_TTS_KEY_456');
   
   // Change Language
   const langSelect = await page.locator('main-page >>> settings-modal >>> #language-select').waitHandle();
@@ -82,11 +82,11 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
   });
   if (savedApiKey !== 'TEST_API_KEY_123') throw new Error(`API Key didn't persist! Got: ${savedApiKey}`);
   
-  const savedOpenaiKey = await page.evaluate(() => {
+  const savedTtsKey = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#openai-api-key-input')?.value;
+    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#tts-api-key-input')?.value;
   });
-  if (savedOpenaiKey !== 'TEST_OPENAI_KEY_456') throw new Error(`OpenAI Key didn't persist! Got: ${savedOpenaiKey}`);
+  if (savedTtsKey !== 'TEST_TTS_KEY_456') throw new Error(`TTS Key didn't persist! Got: ${savedTtsKey}`);
   
   const savedLang = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
@@ -134,11 +134,11 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
   });
   if (resetApiKey !== '') throw new Error(`API Key didn't reset! Got: ${resetApiKey}`);
   
-  const resetOpenaiKey = await page.evaluate(() => {
+  const resetTtsKey = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#openai-api-key-input')?.value;
+    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#tts-api-key-input')?.value;
   });
-  if (resetOpenaiKey !== '') throw new Error(`OpenAI Key didn't reset! Got: ${resetOpenaiKey}`);
+  if (resetTtsKey !== '') throw new Error(`TTS Key didn't reset! Got: ${resetTtsKey}`);
   
   const resetLang = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');

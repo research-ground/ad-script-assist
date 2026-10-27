@@ -41,7 +41,12 @@ import { OpenAIRequest } from '../../ai/openai_client';
 import { parseAgentResponse } from '../../ai/agent_response_parser';
 import { describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
-import { DEFAULT_AGENT_MODEL, getInjectedGeminiApiKey } from '../../core/constants';
+import {
+  DEFAULT_AGENT_MODEL,
+  getDefaultVoiceForTtsProvider,
+  getInjectedGeminiApiKey,
+  getVoicesForTtsProvider,
+} from '../../core/constants';
 import { extractFramesFromVideoBlob } from '../utils/video_frame_extractor';
 import { getVideoExporter } from '../../av/video_exporter';
 import { showConfirm } from '../components/confirm_modal';
@@ -166,7 +171,10 @@ export class AppController {
     this.unsubscribes.push(
       appState.subscribe('currentVideoId', () => this.updateButtonStates()),
       appState.subscribe('isAdAudioGenerating', () => this.updateButtonStates()),
-      appState.subscribe('isAgentResponding', () => this.updateButtonStates())
+      appState.subscribe('isAgentResponding', () => this.updateButtonStates()),
+      appState.subscribe('llmProvider', () => this.updateButtonStates()),
+      appState.subscribe('geminiApiKey', () => this.updateButtonStates()),
+      appState.subscribe('openaiApiKey', () => this.updateButtonStates()),
     );
   }
 
@@ -396,7 +404,30 @@ export class AppController {
     };
   }
 
-  public generateAd() {
+  public async generateAd() {
+    if (!appState.get('isGenerateEnabled')) {
+      return;
+    }
+
+    const existingScriptText = (appState.get('editorScriptText') || '').trim();
+    const existingSegments = appState.get('adSegments') || [];
+    const hasExistingAd =
+      existingScriptText.length > 0 ||
+      existingSegments.some((seg) => seg.script.trim().length > 0);
+
+    if (hasExistingAd) {
+      const isConfirmed = await showConfirm(
+        'Generate Audio Description',
+        'Generating a new Audio Description script will overwrite the existing AD text in the editor, and current edits will be lost. Do you want to continue?',
+        'Generate',
+        'Cancel',
+        true,
+      );
+      if (!isConfirmed) {
+        return;
+      }
+    }
+
     const scriptText = appState.get('editorScriptText') || '';
     const cursorLine = appState.get('editorCursorLine') || 1;
     const context = this.getAgentContext(scriptText, cursorLine);
@@ -451,6 +482,13 @@ export class AppController {
       );
 
       const provider = appState.get('llmProvider') || 'gemini';
+      if (provider === 'none') {
+        const msg = 'VLM provider is set to None. Select Google Gemini or OpenAI in Settings to use AI features.';
+        appState.set('statusMessage', msg);
+        this.appendAgentMessage(`⚠️ ${msg}`, videoId, false);
+        appState.set('isAgentResponding', false);
+        return;
+      }
       let request: GeminiRequest | OpenAIRequest;
       if (provider === 'openai') {
         request = new OpenAIRequest();
@@ -524,7 +562,7 @@ export class AppController {
         const source = provider === 'openai' ? 'OpenAI' : model;
         const hint = provider === 'gemini' && !getInjectedGeminiApiKey()
           ? ' You can try a different model in Settings.' : '';
-        const errMsg = describeError(error).replace(/\.?$/, '.');
+        const errMsg = describeError(error, provider).replace(/\.?$/, '.');
         appState.set('statusMessage', `Error from ${source}: ${errMsg}`);
         this.appendAgentMessage(
           `⚠️ Error from ${source}: ${errMsg}${hint}`, videoId, false);
@@ -686,7 +724,9 @@ export class AppController {
   public async saveSettings(settings: {
     geminiApiKey?: string;
     openaiApiKey?: string;
-    llmProvider?: 'gemini' | 'openai';
+    llmProvider?: 'gemini' | 'openai' | 'none';
+    ttsProvider?: 'gemini' | 'openai' | 'kokoro';
+    ttsApiKey?: string;
     ttsLanguage?: string;
     ttsVoice?: string;
     agentModel?: string;
@@ -713,6 +753,17 @@ export class AppController {
     } else {
       appState.set('llmProvider', 'gemini');
     }
+    if (settings.ttsProvider !== undefined) {
+      appState.set('ttsProvider', settings.ttsProvider);
+      const validVoices = getVoicesForTtsProvider(settings.ttsProvider);
+      const currentVoice = settings.ttsVoice ?? appState.get('ttsVoice');
+      if (!validVoices.some((v) => v.name === currentVoice)) {
+        appState.set('ttsVoice', getDefaultVoiceForTtsProvider(settings.ttsProvider));
+      }
+    }
+    if (settings.ttsApiKey !== undefined) {
+      appState.set('ttsApiKey', settings.ttsApiKey);
+    }
     if (settings.ttsLanguage !== undefined) {
       appState.set('ttsLanguage', settings.ttsLanguage);
     }
@@ -737,6 +788,8 @@ export class AppController {
     appState.set('geminiApiKey', '');
     appState.set('openaiApiKey', '');
     appState.set('llmProvider', 'gemini');
+    appState.set('ttsProvider', 'gemini');
+    appState.set('ttsApiKey', '');
     appState.set('ttsLanguage', 'en-US');
     appState.set('ttsVoice', 'Aoede');
     appState.set('agentModel', '');
@@ -751,10 +804,19 @@ export class AppController {
     const videoId = appState.get('currentVideoId');
     const isGenerating = appState.get('isAdAudioGenerating');
     const isResponding = appState.get('isAgentResponding');
+    const llmProvider = appState.get('llmProvider') || 'gemini';
+    const hasVlmKey =
+      llmProvider !== 'none' &&
+      Boolean(
+        getInjectedGeminiApiKey() ||
+          appState.get('geminiApiKey')?.trim() ||
+          appState.get('openaiApiKey')?.trim(),
+      );
 
     appState.set('isPlayEnabled', !!videoId);
+    appState.set('isGenerateEnabled', !!videoId && hasVlmKey && !isResponding);
     appState.set('isClearEnabled', !!videoId);
     appState.set('isExportEnabled', !!videoId && !isGenerating && !isResponding);
-    appState.set('isAgentInputEnabled', !!videoId && !isResponding);
+    appState.set('isAgentInputEnabled', !!videoId && hasVlmKey && !isResponding);
   }
 }

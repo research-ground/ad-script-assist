@@ -19,21 +19,66 @@
  */
 
 /**
+ * Checks whether an API key looks like it belongs to a different provider
+ * (e.g. a Google Gemini `AIza...` key used with OpenAI, or an OpenAI `sk-...`
+ * key used with Google Gemini) and returns a helpful error message if so.
+ */
+export function validateApiKeyForProvider(
+  apiKey: string,
+  provider: 'gemini' | 'openai',
+  serviceLabel: 'VLM' | 'TTS' = 'VLM',
+): string | null {
+  const trimmed = (apiKey || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (provider === 'gemini' && trimmed.startsWith('sk-')) {
+    return `The ${serviceLabel} API key starts with "sk-", which looks like an OpenAI key rather than a Google Gemini key (Gemini keys start with "AIza"). Please check your ${serviceLabel} provider and API key in Settings.`;
+  }
+  if (provider === 'openai' && trimmed.startsWith('AIza')) {
+    return `The ${serviceLabel} API key starts with "AIza", which looks like a Google Gemini key rather than an OpenAI key (OpenAI keys start with "sk-"). Please check your ${serviceLabel} provider and API key in Settings.`;
+  }
+  return null;
+}
+
+/**
  * Returns a readable message for an error thrown by an AI client. The Gemini
  * SDK puts a JSON body in `error.message`, e.g.
  * `{"error":{"code":503,"message":"...","status":"UNAVAILABLE"}}`.
  */
-export function describeError(error: unknown): string {
+export function describeError(
+  error: unknown,
+  provider?: 'gemini' | 'openai' | 'none',
+): string {
   const raw = error instanceof Error ? error.message : String(error);
+  let extracted = raw;
   try {
     const body = JSON.parse(raw.slice(raw.indexOf('{')));
     const e = body.error ?? body;
     if (e.message) {
       const code = [e.code, e.status && `(${e.status})`].filter(Boolean).join(' ');
-      return code ? `${code}: ${e.message}` : e.message;
+      extracted = code ? `${code}: ${e.message}` : e.message;
     }
   } catch {
     // Not JSON; fall through to the raw message.
   }
-  return raw;
+
+  const lower = extracted.toLowerCase();
+  if (
+    lower.includes('api_key_invalid') ||
+    lower.includes('api key not valid') ||
+    lower.includes('invalid_api_key') ||
+    lower.includes('incorrect api key') ||
+    lower.includes('401') ||
+    lower.includes('unauthorized')
+  ) {
+    if (provider === 'gemini' && !extracted.includes('OpenAI key')) {
+      return `${extracted} Make sure you entered a valid Google Gemini API key (not an OpenAI key) in Settings.`;
+    }
+    if (provider === 'openai' && !extracted.includes('Gemini key')) {
+      return `${extracted} Make sure you entered a valid OpenAI API key (not a Google Gemini key) in Settings.`;
+    }
+  }
+
+  return extracted;
 }

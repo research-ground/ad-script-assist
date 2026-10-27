@@ -27,6 +27,7 @@ export class TopBar extends LitElement {
   @state() private isLocalVideo = false;
   @state() private canExportVideo = false;
   @state() private isPlayEnabled = false;
+  @state() private isGenerateEnabled = false;
   @state() private isExportEnabled = false;
   @state() private isClearEnabled = false;
   @state() private isAgentResponding = false;
@@ -42,6 +43,9 @@ export class TopBar extends LitElement {
       }),
       appState.subscribe('isPlayEnabled', (val) => {
         this.isPlayEnabled = val;
+      }),
+      appState.subscribe('isGenerateEnabled', (val) => {
+        this.isGenerateEnabled = val;
       }),
       appState.subscribe('isExportEnabled', (val) => {
         this.isExportEnabled = val;
@@ -214,9 +218,14 @@ export class TopBar extends LitElement {
       border-color: var(--accent-color, #1a73e8);
     }
 
-    button.primary-btn:hover {
+    button.primary-btn:hover:not(:disabled) {
       background-color: var(--accent-hover, #1557b0);
       color: #ffffff;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .material-icons {
@@ -296,16 +305,18 @@ export class TopBar extends LitElement {
           
           <button
             class="primary-btn"
-            @click=${() => this.controller.generateAd()}
-            ?disabled=${!this.isPlayEnabled}
+            @click=${() => void this.controller.generateAd()}
+            ?disabled=${!this.isGenerateEnabled}
             aria-busy=${this.isAgentResponding ? 'true' : 'false'}
-            aria-label="(Re)Generate AD"
+            aria-label="Generate AD"
             title=${!this.isPlayEnabled
               ? 'Load a video first to generate an Audio Description script'
-              : 'Generate an Audio Description script with AI'}
+              : !this.isGenerateEnabled
+                ? 'Configure a VLM provider and API key in Settings to generate an Audio Description script'
+                : 'Generate an Audio Description script with AI'}
           >
             <span class="material-icons" aria-hidden="true">auto_awesome</span>
-            (Re)Generate AD
+            Generate AD
           </button>
           
           <button @click=${this.handleClearProject} ?disabled=${!this.isClearEnabled} aria-label="Clear Project" style="color: var(--error-color, #d93025);">

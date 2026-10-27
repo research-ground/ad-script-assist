@@ -210,7 +210,7 @@ export class AgentChat extends LitElement {
           ? html`
               <div class="empty-chat-state" role="note">
                 <strong>AI Assistant Ready</strong><br />
-                Ask questions about the video, click <em>(Re)Generate AD</em> to draft a full WebVTT script, or request edits to specific cues.
+                Ask questions about the video, click <em>Generate AD</em> to draft a full WebVTT script, or request edits to specific cues.
               </div>
             `
           : ''}

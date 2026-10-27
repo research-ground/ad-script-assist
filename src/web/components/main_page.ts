@@ -23,7 +23,7 @@ import {
   formatTimeForScreenReader,
 } from '../../core/time_utils';
 import type {AdSegment, AgentContext, AgentResponse} from '../../core/types';
-import {TTS_VOICES} from '../../core/constants';
+import {getVoicesForTtsProvider} from '../../core/constants';
 import {adAudioManager} from '../../av/ad_audio_manager';
 import {AppController} from '../controller/app_controller';
 
@@ -68,6 +68,7 @@ export class MainPage extends LitElement {
   @state() isAdAudioGenerating = false;
   @state() ttsLanguage = 'en-US';
   @state() ttsVoice = 'Aoede';
+  @state() ttsProvider: 'gemini' | 'openai' | 'kokoro' = 'gemini';
   @state() speakAdText = true;
   @state() private scriptNotes = '';
 
@@ -419,6 +420,11 @@ export class MainPage extends LitElement {
       })
     );
     this.unsubscribes.push(
+      appState.subscribe('ttsProvider', (provider) => {
+        this.ttsProvider = (provider as 'gemini' | 'openai' | 'kokoro') || 'gemini';
+      })
+    );
+    this.unsubscribes.push(
       appState.subscribe('speakAdText', (val) => {
         this.speakAdText = val;
       })
@@ -498,9 +504,7 @@ export class MainPage extends LitElement {
         this.moveToTextArea();
       },
       'REGENERATE_AD_SCRIPT': () => {
-        this.setAgentInputCommand(
-          'Please write a full audio description script for this video. You MUST place the full script in the "script" field of your JSON response, not in the "response" field.',
-        );
+        void this.controller.generateAd();
       },
       'EXPORT_AUDIO_DESCRIPTION': () => {
         void this.controller.exportFile('audio', this.localVideoFile);
@@ -742,78 +746,85 @@ export class MainPage extends LitElement {
           <section class="project-settings-section">
             <h2>Project Settings</h2>
             <div class="settings-content">
-              <div class="setting-row">
-                <label for="speakToggle" class="checkbox-label">
-                  <input 
-                    type="checkbox" 
-                    id="speakToggle" 
-                    .checked=${this.speakAdText}
-                    @change=${(e: Event) => {
-                      const checked = (e.target as HTMLInputElement).checked;
-                      appState.set('speakAdText', checked);
-                    }}
-                  />
-                  Speak AD Text
-                </label>
-              </div>
-              <div class="setting-row">
-                <label for="voiceSelect">Voice</label>
-                <select
-                  id="voiceSelect"
-                  class="form-select"
-                  .value=${this.ttsVoice}
-                  @change=${async (e: Event) => {
-                    const select = e.target as HTMLSelectElement;
-                    const newVoice = select.value;
-                    const oldVoice = this.ttsVoice;
-                    
-                    if (newVoice === oldVoice) return;
-                    
-                    const segments = appState.get('adSegments') || [];
-                    const hasSpeech = segments.some(s => !!s.audioData);
-                    
-                    if (hasSpeech) {
-                      const isConfirmed = await showConfirm(
-                        'Change Voice',
-                        'You have already generated speech. Do you want to regenerate it with the new voice?',
-                        'Regenerate',
-                        'Cancel',
-                        true
-                      );
+              <div class="settings-subsection" role="group" aria-labelledby="voice-settings-heading" style="width: 100%; display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color, #dadce0);">
+                <h3 id="voice-settings-heading" style="margin: 0; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--secondary-text, #5f6368);">Voice Settings</h3>
+                <div class="setting-row">
+                  <label for="speakToggle" class="checkbox-label">
+                    <input 
+                      type="checkbox" 
+                      id="speakToggle" 
+                      .checked=${this.speakAdText}
+                      @change=${(e: Event) => {
+                        const checked = (e.target as HTMLInputElement).checked;
+                        appState.set('speakAdText', checked);
+                      }}
+                    />
+                    Speak AD Text
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <label for="voiceSelect">Voice</label>
+                  <select
+                    id="voiceSelect"
+                    class="form-select"
+                    .value=${this.ttsVoice}
+                    @change=${async (e: Event) => {
+                      const select = e.target as HTMLSelectElement;
+                      const newVoice = select.value;
+                      const oldVoice = this.ttsVoice;
                       
-                      if (isConfirmed) {
+                      if (newVoice === oldVoice) return;
+                      
+                      const segments = appState.get('adSegments') || [];
+                      const hasSpeech = segments.some(s => !!s.audioData);
+                      
+                      if (hasSpeech) {
+                        const isConfirmed = await showConfirm(
+                          'Change Voice',
+                          'You have already generated speech. Do you want to regenerate it with the new voice?',
+                          'Regenerate',
+                          'Cancel',
+                          true
+                        );
+                        
+                        if (isConfirmed) {
+                          this.ttsVoice = newVoice;
+                          appState.set('ttsVoice', newVoice);
+                          void adAudioManager.regenerateAdAudio(true);
+                        } else {
+                          select.value = oldVoice;
+                        }
+                      } else {
                         this.ttsVoice = newVoice;
                         appState.set('ttsVoice', newVoice);
-                        void adAudioManager.regenerateAdAudio(true);
-                      } else {
-                        select.value = oldVoice;
+                        if (segments.length > 0) {
+                          void adAudioManager.regenerateAdAudio(true);
+                        }
                       }
-                    } else {
-                      this.ttsVoice = newVoice;
-                      appState.set('ttsVoice', newVoice);
-                      if (segments.length > 0) {
-                        void adAudioManager.regenerateAdAudio(true);
-                      }
-                    }
-                  }}
-                >
-                  ${(TTS_VOICES[this.ttsLanguage] || TTS_VOICES['en-US']).map(
-                    (v) => html`<option value="${v.name}">${v.label}</option>`
-                  )}
-                </select>
+                    }}
+                  >
+                    ${getVoicesForTtsProvider(this.ttsProvider).map(
+                      (v) => html`<option value="${v.name}" ?selected=${this.ttsVoice === v.name}>${v.label}</option>`
+                    )}
+                  </select>
+                </div>
               </div>
-              <div class="setting-row-notes" style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px; width: 100%;">
-                <label for="scriptNotes" style="font-weight: 500;">Script Notes</label>
-                <textarea
-                  id="scriptNotes"
-                  style="width: 100%; min-height: 80px; padding: 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--primary-bg); color: var(--primary-text); font-family: inherit; font-size: 0.85rem; resize: vertical; box-sizing: border-box;"
-                  .value=${this.scriptNotes}
-                  @input=${(e: Event) => {
-                    const value = (e.target as HTMLTextAreaElement).value;
-                    appState.set('scriptNotes', value);
-                  }}
-                  placeholder="Style, vocabulary rules, or characters..."
-                ></textarea>
+
+              <div class="settings-subsection" role="group" aria-labelledby="script-settings-heading" style="width: 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 4px;">
+                <h3 id="script-settings-heading" style="margin: 0; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--secondary-text, #5f6368);">Script Settings</h3>
+                <div class="setting-row-notes" style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+                  <label for="scriptNotes" style="font-weight: 500;">Script Notes</label>
+                  <textarea
+                    id="scriptNotes"
+                    style="width: 100%; min-height: 80px; padding: 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--primary-bg); color: var(--primary-text); font-family: inherit; font-size: 0.85rem; resize: vertical; box-sizing: border-box;"
+                    .value=${this.scriptNotes}
+                    @input=${(e: Event) => {
+                      const value = (e.target as HTMLTextAreaElement).value;
+                      appState.set('scriptNotes', value);
+                    }}
+                    placeholder="Style, vocabulary rules, or characters..."
+                  ></textarea>
+                </div>
               </div>
             </div>
           </section>

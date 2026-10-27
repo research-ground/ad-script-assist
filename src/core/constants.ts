@@ -56,12 +56,24 @@ export const TTS_LANGUAGES = [
   { code: 'ja-JP', label: 'Japanese' },
 ];
 
-const GEMINI_VOICES = [
-  { name: 'Aoede', label: 'Aoede (Cloud)' },
-  { name: 'Charon', label: 'Charon (Cloud)' },
-  { name: 'Fenrir', label: 'Fenrir (Cloud)' },
-  { name: 'Kore', label: 'Kore (Cloud)' },
-  { name: 'Puck', label: 'Puck (Cloud)' },
+export const GEMINI_VOICES = [
+  { name: 'Aoede', label: 'Aoede (Gemini Cloud)' },
+  { name: 'Charon', label: 'Charon (Gemini Cloud)' },
+  { name: 'Fenrir', label: 'Fenrir (Gemini Cloud)' },
+  { name: 'Kore', label: 'Kore (Gemini Cloud)' },
+  { name: 'Puck', label: 'Puck (Gemini Cloud)' },
+];
+
+export const OPENAI_VOICES = [
+  { name: 'alloy', label: 'Alloy (OpenAI Cloud)' },
+  { name: 'ash', label: 'Ash (OpenAI Cloud)' },
+  { name: 'coral', label: 'Coral (OpenAI Cloud)' },
+  { name: 'echo', label: 'Echo (OpenAI Cloud)' },
+  { name: 'fable', label: 'Fable (OpenAI Cloud)' },
+  { name: 'nova', label: 'Nova (OpenAI Cloud)' },
+  { name: 'onyx', label: 'Onyx (OpenAI Cloud)' },
+  { name: 'sage', label: 'Sage (OpenAI Cloud)' },
+  { name: 'shimmer', label: 'Shimmer (OpenAI Cloud)' },
 ];
 
 export const KOKORO_VOICES = [
@@ -75,13 +87,45 @@ export const KOKORO_VOICES = [
   { name: 'bm_george', label: 'George (Kokoro Local, UK)' },
 ];
 
-const ALL_VOICES = [...GEMINI_VOICES, ...KOKORO_VOICES];
+const ALL_VOICES = [...GEMINI_VOICES, ...OPENAI_VOICES, ...KOKORO_VOICES];
 
 const KOKORO_VOICE_SET = new Set(KOKORO_VOICES.map((v) => v.name));
+const OPENAI_VOICE_SET = new Set(OPENAI_VOICES.map((v) => v.name));
+const GEMINI_VOICE_SET = new Set(GEMINI_VOICES.map((v) => v.name));
 
 /** Returns true if the given voice identifier is a local Kokoro neural TTS voice. */
 export function isKokoroVoice(voiceName: string): boolean {
   return KOKORO_VOICE_SET.has(voiceName) || /^(af|am|bf|bm)_/.test(voiceName);
+}
+
+/** Returns true if the given voice identifier is an OpenAI TTS voice. */
+export function isOpenAIVoice(voiceName: string): boolean {
+  return OPENAI_VOICE_SET.has(voiceName);
+}
+
+/** Returns true if the given voice identifier is a Google Gemini TTS voice. */
+export function isGeminiVoice(voiceName: string): boolean {
+  return GEMINI_VOICE_SET.has(voiceName);
+}
+
+/** Returns the default voice for the given TTS engine. */
+export function getDefaultVoiceForTtsProvider(provider: 'gemini' | 'openai' | 'kokoro'): string {
+  if (provider === 'openai') return 'alloy';
+  if (provider === 'kokoro') return DEFAULT_KOKORO_VOICE;
+  return 'Aoede';
+}
+
+/** Returns the available voice options for the selected TTS engine. */
+export function getVoicesForTtsProvider(
+  provider: 'gemini' | 'openai' | 'kokoro',
+): {name: string; label: string}[] {
+  if (provider === 'kokoro') {
+    return KOKORO_VOICES;
+  }
+  if (provider === 'openai') {
+    return [...OPENAI_VOICES, ...KOKORO_VOICES];
+  }
+  return [...GEMINI_VOICES, ...KOKORO_VOICES];
 }
 
 export const TTS_VOICES: Record<string, {name: string, label: string}[]> = {

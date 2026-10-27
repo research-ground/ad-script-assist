@@ -44,6 +44,7 @@ export interface AppState {
 
   // Computed Action States
   isPlayEnabled: boolean;
+  isGenerateEnabled: boolean;
   isExportEnabled: boolean;
   isClearEnabled: boolean;
   isAgentInputEnabled: boolean;
@@ -55,7 +56,9 @@ export interface AppState {
   // User Settings (Saved globally)
   geminiApiKey: string;
   openaiApiKey: string;
-  llmProvider: 'gemini' | 'openai';
+  llmProvider: 'gemini' | 'openai' | 'none';
+  ttsProvider: 'gemini' | 'openai' | 'kokoro';
+  ttsApiKey: string;
   ttsLanguage: string;
   agentModel: string; // '' = DEFAULT_AGENT_MODEL
   speechModel: string; // '' = DEFAULT_SPEECH_MODEL
@@ -72,7 +75,16 @@ export interface AppState {
 
 type StateListener<T> = (value: T) => void;
 
-const USER_SETTINGS_KEYS = ['geminiApiKey', 'openaiApiKey', 'llmProvider', 'ttsLanguage', 'agentModel', 'speechModel'] as const;
+const USER_SETTINGS_KEYS = [
+  'geminiApiKey',
+  'openaiApiKey',
+  'llmProvider',
+  'ttsProvider',
+  'ttsApiKey',
+  'ttsLanguage',
+  'agentModel',
+  'speechModel',
+] as const;
 const PROJECT_SETTINGS_KEYS = [
   'currentVideoId',
   'ttsVoice',
@@ -103,6 +115,7 @@ class AppStateManager {
     isAddVideoModalOpen: false,
 
     isPlayEnabled: false,
+    isGenerateEnabled: false,
     isExportEnabled: false,
     isClearEnabled: false,
     isAgentInputEnabled: false,
@@ -113,6 +126,8 @@ class AppStateManager {
     geminiApiKey: '',
     openaiApiKey: '',
     llmProvider: 'gemini',
+    ttsProvider: 'gemini',
+    ttsApiKey: '',
     ttsLanguage: 'en-US',
     agentModel: '',
     speechModel: '',
@@ -132,10 +147,20 @@ class AppStateManager {
     // Load User Settings from localStorage immediately
     if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
       const hasInjectedKey = Boolean(getInjectedGeminiApiKey());
-      this.state.geminiApiKey = localStorage.getItem('userSettings_geminiApiKey') || '';
-      this.state.openaiApiKey = localStorage.getItem('userSettings_openaiApiKey') || '';
-      this.state.llmProvider = (localStorage.getItem('userSettings_llmProvider') as 'gemini' | 'openai') || 'gemini';
+      const storedVlmKey =
+        localStorage.getItem('userSettings_geminiApiKey') ||
+        localStorage.getItem('userSettings_openaiApiKey') ||
+        '';
+      this.state.geminiApiKey = storedVlmKey;
+      this.state.openaiApiKey = storedVlmKey;
+      this.state.llmProvider =
+        (localStorage.getItem('userSettings_llmProvider') as 'gemini' | 'openai' | 'none') ||
+        'gemini';
       if (hasInjectedKey) this.state.llmProvider = 'gemini'; // Injected key / AI Studio: locked to Gemini.
+      this.state.ttsProvider =
+        (localStorage.getItem('userSettings_ttsProvider') as 'gemini' | 'openai' | 'kokoro') ||
+        'gemini';
+      this.state.ttsApiKey = localStorage.getItem('userSettings_ttsApiKey') || '';
       this.state.ttsLanguage = localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
       if (!hasInjectedKey) { // Injected key / AI Studio: always the default models.
         this.state.agentModel = localStorage.getItem('userSettings_agentModel') || '';
@@ -166,6 +191,21 @@ class AppStateManager {
 
     this.state[key] = value;
     this.notify(key, value);
+
+    // Keep the single VLM API key synchronized across geminiApiKey and openaiApiKey.
+    if (key === 'geminiApiKey' && typeof value === 'string') {
+      this.state.openaiApiKey = value;
+      this.notify('openaiApiKey', value);
+      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+        localStorage.setItem('userSettings_openaiApiKey', value);
+      }
+    } else if (key === 'openaiApiKey' && typeof value === 'string') {
+      this.state.geminiApiKey = value;
+      this.notify('geminiApiKey', value);
+      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+        localStorage.setItem('userSettings_geminiApiKey', value);
+      }
+    }
 
     // Auto-save User Settings
     if ((USER_SETTINGS_KEYS as readonly string[]).includes(key as string)) {

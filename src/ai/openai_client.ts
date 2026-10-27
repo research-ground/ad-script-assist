@@ -17,16 +17,14 @@
 import { DEFAULT_AGENT_MODEL, ModelName } from '../core/constants';
 import { GeminiRequestPlusData } from '../core/types';
 import { appState } from '../core/app_state';
+import { validateApiKeyForProvider } from './describe_error';
 
 export function getOpenAIApiKey(): string {
   let apiKey = '';
   if (typeof window !== 'undefined') {
-    apiKey = appState.get('openaiApiKey');
+    apiKey = appState.get('openaiApiKey') || appState.get('geminiApiKey') || '';
   } else if (typeof process !== 'undefined' && process.env) {
     apiKey = process.env.OPENAI_API_KEY || '';
-  }
-  if (!apiKey) {
-    apiKey = 'dummy-key-for-tests'; // Fallback for tests
   }
   return apiKey;
 }
@@ -68,7 +66,14 @@ export class OpenAIRequest {
     }
 
     try {
-      const apiKey = getOpenAIApiKey();
+      const apiKey = getOpenAIApiKey().trim();
+      if (!apiKey) {
+        throw new Error('No OpenAI API key configured. Open Settings to add one.');
+      }
+      const keyMismatch = validateApiKeyForProvider(apiKey, 'openai', 'VLM');
+      if (keyMismatch) {
+        throw new Error(keyMismatch);
+      }
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -85,7 +90,12 @@ export class OpenAIRequest {
       });
 
       if (!response.ok) {
-        throw new Error(`OpenAI API request failed: ${response.statusText}`);
+        const errText = await response.text().catch(() => '');
+        throw new Error(
+          errText
+            ? `OpenAI API request failed (${response.status}): ${errText}`
+            : `OpenAI API request failed (${response.status}): ${response.statusText}`,
+        );
       }
 
       const json = await response.json();
