@@ -78,14 +78,14 @@ export class AddVideoModal extends LitElement {
       background: rgba(0, 0, 0, 0.5);
     }
     .modal {
-      background: white;
-      color: #202124;
+      background: var(--secondary-bg, #ffffff);
+      color: var(--primary-text, #202124);
       display: flex;
       flex-direction: column;
       font-family: 'Inter', sans-serif;
     }
     .header {
-      padding: 24px;
+      padding: 20px 24px 16px;
       border-bottom: 1px solid #dadce0;
       display: flex;
       justify-content: space-between;
@@ -94,7 +94,13 @@ export class AddVideoModal extends LitElement {
     .header h2 {
       margin: 0;
       font-size: 22px;
-      font-weight: 400;
+      font-weight: 500;
+    }
+    .modal-intro {
+      margin: 0 0 16px 0;
+      font-size: 14px;
+      color: #5f6368;
+      line-height: 1.4;
     }
     .close-btn {
       background: none;
@@ -102,19 +108,27 @@ export class AddVideoModal extends LitElement {
       font-size: 1.5rem;
       cursor: pointer;
       color: #5f6368;
-      padding: 0;
+      padding: 4px 8px;
+      border-radius: 4px;
       line-height: 1;
     }
     .close-btn:hover {
       color: #202124;
+      background: #f1f3f4;
+    }
+    .close-btn:focus-visible,
+    button.primary:focus-visible,
+    input[type="text"]:focus-visible {
+      outline: 2px solid #1a73e8;
+      outline-offset: 2px;
     }
     .content {
-      padding: 24px;
+      padding: 20px 24px 24px;
     }
     .drop-zone {
       border: 2px dashed #dadce0;
       border-radius: 8px;
-      padding: 32px;
+      padding: 24px;
       text-align: center;
       cursor: pointer;
       transition: all 0.2s;
@@ -122,6 +136,17 @@ export class AddVideoModal extends LitElement {
       color: #5f6368;
       font-size: 14px;
       line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .field-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 6px;
     }
     .drop-zone:hover {
       background: #f1f3f4;
@@ -389,28 +414,43 @@ export class AddVideoModal extends LitElement {
 
   render() {
     return html`
-      <dialog @cancel=${this.handleDialogCancel}>
+      <dialog aria-labelledby="add-video-title" @cancel=${this.handleDialogCancel}>
         <div class="modal">
           <div class="header">
-            <h2>Add Video</h2>
-            <button class="close-btn" @click=${this.close}>&times;</button>
+            <h2 id="add-video-title">Add Video</h2>
+            <button class="close-btn" aria-label="Close" title="Close" @click=${this.close}>&times;</button>
           </div>
           
           <div class="content">
+            <p class="modal-intro">
+              Upload a local video file from your computer or import a YouTube video by URL.
+            </p>
             <div class="drop-zone ${this.isDragging ? 'dragging' : ''}"
                  @dragover=${this.handleDragOver}
                  @dragleave=${this.handleDragLeave}
                  @drop=${this.handleDrop}
-                 @click=${() => this.shadowRoot?.querySelector('input[type="file"]')?.dispatchEvent(new MouseEvent('click'))}>
-              Drag & drop a local video (Max 75MB, 10 min)<br/>or click to browse
-              <input type="file" accept="video/*" style="display:none" @change=${this.handleFileInput}>
+                 @click=${(e: MouseEvent) => {
+                   if ((e.target as HTMLElement).tagName !== 'BUTTON') {
+                     this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+                   }
+                 }}>
+              <button
+                type="button"
+                class="primary browse-btn"
+                @click=${() => this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
+                Browse Local Files...
+              </button>
+              <span>or drag &amp; drop a local video (Max 75MB, 10 min)</span>
+              <input type="file" accept="video/*" style="display:none" aria-label="Upload local video file" @change=${this.handleFileInput}>
             </div>
             
             <div class="divider">OR</div>
             
+            <label class="field-label" for="youtube-url-input">YouTube Video URL</label>
             <div class="youtube-input-container">
-              <input type="text" 
-                     placeholder="Paste YouTube URL..." 
+              <input id="youtube-url-input"
+                     type="text" 
+                     placeholder="https://www.youtube.com/watch?v=..." 
                      .value=${this.youtubeUrl}
                      @input=${this.handleYouTubeInput}
                      @keydown=${this.handleYouTubeKeyDown}>
@@ -422,8 +462,8 @@ export class AddVideoModal extends LitElement {
               </button>
             </div>
             
-            ${this.isLoading ? html`<div class="loading">Validating video...</div>` : ''}
-            ${this.error ? html`<div class="error">${this.error}</div>` : ''}
+            ${this.isLoading ? html`<div class="loading" role="status" aria-live="polite">Validating video...</div>` : ''}
+            ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : ''}
           </div>
         </div>
       </dialog>

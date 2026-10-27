@@ -29,6 +29,7 @@ export class TopBar extends LitElement {
   @state() private isPlayEnabled = false;
   @state() private isExportEnabled = false;
   @state() private isClearEnabled = false;
+  @state() private isAgentResponding = false;
 
   private readonly controller = AppController.getInstance();
   private unsubscribes: Array<() => void> = [];
@@ -47,6 +48,9 @@ export class TopBar extends LitElement {
       }),
       appState.subscribe('isClearEnabled', (val) => {
         this.isClearEnabled = val;
+      }),
+      appState.subscribe('isAgentResponding', (val) => {
+        this.isAgentResponding = !!val;
       })
     );
   }
@@ -67,6 +71,44 @@ export class TopBar extends LitElement {
           (supported) => (this.canExportVideo = supported),
           () => (this.canExportVideo = false),
         );
+    }
+    if (this.showExportMenu) {
+      void this.updateComplete.then(() => {
+        const firstItem = this.shadowRoot?.querySelector<HTMLButtonElement>(
+          '.dropdown-menu button:not([disabled])',
+        );
+        firstItem?.focus();
+      });
+    }
+  }
+
+  private handleExportMenuKeydown(e: KeyboardEvent) {
+    const items = Array.from(
+      this.shadowRoot?.querySelectorAll<HTMLButtonElement>(
+        '.dropdown-menu button:not([disabled])',
+      ) || [],
+    );
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.showExportMenu = false;
+      const trigger = this.shadowRoot?.querySelector<HTMLButtonElement>(
+        '#exportMenuButton',
+      );
+      trigger?.focus();
+      return;
+    }
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(
+      (this.shadowRoot?.activeElement as HTMLButtonElement) || items[0],
+    );
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = items[(currentIndex + 1) % items.length];
+      next?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = items[(currentIndex - 1 + items.length) % items.length];
+      prev?.focus();
     }
   }
 
@@ -126,6 +168,12 @@ export class TopBar extends LitElement {
       letter-spacing: 0.02em;
     }
 
+    .info-icon {
+      color: var(--secondary-text, #5f6368);
+      font-size: 16px;
+      cursor: help;
+    }
+
     .action-group {
       display: flex;
       align-items: center;
@@ -148,6 +196,11 @@ export class TopBar extends LitElement {
       transition: all 0.1s ease;
       text-decoration: none;
       box-sizing: border-box;
+    }
+
+    button:focus-visible, a.button-link:focus-visible {
+      outline: 2px solid var(--accent-color, #1a73e8);
+      outline-offset: 2px;
     }
 
     button:hover, a.button-link:hover {
@@ -227,6 +280,12 @@ export class TopBar extends LitElement {
         <div class="title-group">
           <span class="material-icons logo-icon" aria-hidden="true">movie_edit</span>
           <h1>AD Script Assist</h1>
+          <span
+            class="material-icons info-icon"
+            role="img"
+            aria-label="About AD Script Assist: Create, edit, and synthesize Audio Description scripts for videos."
+            title="Create, edit, and synthesize Audio Description scripts for videos."
+          >info_outline</span>
         </div>
         
         <div class="action-group">
@@ -235,26 +294,57 @@ export class TopBar extends LitElement {
             Add Video
           </button>
           
-          <button class="primary-btn" @click=${() => this.controller.generateAd()} ?disabled=${!this.isPlayEnabled} aria-label="(Re)Generate AD">
+          <button
+            class="primary-btn"
+            @click=${() => this.controller.generateAd()}
+            ?disabled=${!this.isPlayEnabled}
+            aria-busy=${this.isAgentResponding ? 'true' : 'false'}
+            aria-label="(Re)Generate AD"
+            title=${!this.isPlayEnabled
+              ? 'Load a video first to generate an Audio Description script'
+              : 'Generate an Audio Description script with AI'}
+          >
             <span class="material-icons" aria-hidden="true">auto_awesome</span>
             (Re)Generate AD
           </button>
           
-          <button @click=${this.handleClearProject} ?disabled=${!this.isClearEnabled} aria-label="Clear Project" style="color: #ef4444;">
+          <button @click=${this.handleClearProject} ?disabled=${!this.isClearEnabled} aria-label="Clear Project" style="color: var(--error-color, #d93025);">
             <span class="material-icons" aria-hidden="true">delete_sweep</span>
             Clear Project
           </button>
           
           <div class="dropdown">
-            <button @click=${this.toggleExportMenu} ?disabled=${!this.isExportEnabled} aria-label="Export Menu">
+            <button
+              id="exportMenuButton"
+              @click=${this.toggleExportMenu}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === 'ArrowDown' && !this.showExportMenu) {
+                  e.preventDefault();
+                  this.toggleExportMenu();
+                } else if (e.key === 'Escape' && this.showExportMenu) {
+                  e.preventDefault();
+                  this.showExportMenu = false;
+                }
+              }}
+              ?disabled=${!this.isExportEnabled}
+              aria-label="Export Menu"
+              aria-haspopup="menu"
+              aria-expanded=${this.showExportMenu ? 'true' : 'false'}
+            >
               <span class="material-icons" aria-hidden="true">file_download</span>
               Export
             </button>
             ${this.showExportMenu ? html`
-              <div class="dropdown-menu">
-                <button @click=${() => this.handleExport('webvtt')}>Export WebVTT</button>
-                <button @click=${() => this.handleExport('audio')}>Export Audio</button>
+              <div
+                class="dropdown-menu"
+                role="menu"
+                aria-label="Export Options"
+                @keydown=${this.handleExportMenuKeydown}
+              >
+                <button role="menuitem" @click=${() => this.handleExport('webvtt')}>Export WebVTT</button>
+                <button role="menuitem" @click=${() => this.handleExport('audio')}>Export Audio</button>
                 <button
+                  role="menuitem"
                   @click=${() => this.handleExport('video')}
                   ?disabled=${!this.isLocalVideo || !this.canExportVideo}
                   title=${!this.isLocalVideo
@@ -263,14 +353,10 @@ export class TopBar extends LitElement {
                       ? 'Requires a browser with built-in AAC audio encoding'
                       : ''}
                 >Export Mixed Video</button>
-
+                <button role="menuitem" @click=${() => this.handleExport('all')}>Export All</button>
               </div>
             ` : ''}
           </div>
-          <button @click=${() => this.dispatchEvent(new CustomEvent('toggle-debug'))} aria-label="Toggle Debug">
-            <span class="material-icons" aria-hidden="true">bug_report</span>
-            Debug
-          </button>
           
           <button @click=${() => this.controller.openSettings()} aria-label="Settings">
             <span class="material-icons" aria-hidden="true">settings</span>

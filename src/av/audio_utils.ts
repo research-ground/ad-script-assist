@@ -192,7 +192,7 @@ export async function compileADAudioTrack(
   }
 
   const audioContext = getAudioContext();
-  const buffers: Array<{buffer: AudioBuffer; startTime: number}> =
+  const buffers: Array<{buffer: AudioBuffer; startTime: number; endTime?: number}> =
     await Promise.all(
       validEntries.map(async (entry) => {
         try {
@@ -207,7 +207,11 @@ export async function compileADAudioTrack(
           }
           const arrayBuffer = await response.arrayBuffer();
           const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-          return {buffer: audioBuffer, startTime: entry.startTime};
+          return {
+            buffer: audioBuffer,
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+          };
         } catch (err) {
           console.error(
             `[compileADAudioTrack] Error processing segment at ${entry.startTime}s:`,
@@ -247,9 +251,15 @@ export async function compileADAudioTrack(
     SAMPLE_RATE,
   );
 
-  for (const {buffer, startTime} of buffers) {
+  for (const {buffer, startTime, endTime} of buffers) {
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
+    if (endTime !== undefined && endTime > startTime) {
+      const slotDuration = endTime - startTime;
+      if (buffer.duration > slotDuration && slotDuration > 0.2) {
+        source.playbackRate.value = Math.min(1.5, buffer.duration / slotDuration);
+      }
+    }
     source.connect(offlineCtx.destination);
     source.start(startTime);
   }

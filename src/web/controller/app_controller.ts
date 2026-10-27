@@ -35,15 +35,16 @@ import {
   resetHotkeyConfigsInDB,
   storeHotkeyConfigsToDB,
 } from '../storage/db';
-import { formatTimeForScreenReader } from '../../core/time_utils';
+import { formatTimeForScreenReader, formatTimeForVttFull } from '../../core/time_utils';
 import { GeminiRequest } from '../../ai/gemini_client';
 import { OpenAIRequest } from '../../ai/openai_client';
 import { parseAgentResponse } from '../../ai/agent_response_parser';
 import { describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
-import { DEFAULT_AGENT_MODEL, EMBEDDED_GEMINI_API_KEY } from '../../core/constants';
+import { DEFAULT_AGENT_MODEL, getInjectedGeminiApiKey } from '../../core/constants';
 import { extractFramesFromVideoBlob } from '../utils/video_frame_extractor';
 import { getVideoExporter } from '../../av/video_exporter';
+import { showConfirm } from '../components/confirm_modal';
 import type { AdSegment, AgentContext, AgentResponse, ConversationEntry, GeminiRequestPlusData, HotkeyConfigEntry } from '../../core/types';
 
 export class AppController {
@@ -51,8 +52,6 @@ export class AppController {
 
   // Playback audio elements
   private readonly adAudio = new Audio();
-  private lastSpokenSegmentId: string | null = null;
-  private currentUtterance: SpeechSynthesisUtterance | null = null;
   private compiledAdTrackUrl: string | null = null;
 
   private hotkeyManager = new HotkeyManager();
@@ -124,9 +123,6 @@ export class AppController {
       appState.subscribe('speakAdText', (speak) => {
         if (!speak) {
           this.adAudio.pause();
-          if (this.currentUtterance) {
-            window.speechSynthesis.cancel();
-          }
         } else {
           const player = appState.get('videoPlayerApi');
           if (player && !player.paused && this.compiledAdTrackUrl) {
@@ -142,9 +138,14 @@ export class AppController {
       appState.subscribe('isVideoPaused', (paused) => {
         if (paused) {
           this.adAudio.pause();
-          window.speechSynthesis.cancel();
-          this.lastSpokenSegmentId = null;
         } else {
+          if (this.shouldBlockPlaybackWhileGenerating()) {
+            const player = appState.get('videoPlayerApi');
+            player?.pause();
+            appState.set('isVideoPaused', true);
+            this.alertSpeechGenerating();
+            return;
+          }
           this.syncAdAudioWithVideo();
         }
       })
@@ -209,8 +210,6 @@ export class AppController {
     const speakAdText = appState.get('speakAdText') ?? true;
     if (!speakAdText) {
       this.adAudio.pause();
-      window.speechSynthesis.cancel();
-      this.lastSpokenSegmentId = null;
       return;
     }
     const player = appState.get('videoPlayerApi');
@@ -223,34 +222,6 @@ export class AppController {
       }
       if (this.adAudio.paused) {
         void this.adAudio.play().catch(() => {});
-      }
-    }
-
-
-    const adSegments = appState.get('adSegments') || [];
-    for (const seg of adSegments) {
-      if (currentTime >= seg.startTime && currentTime <= seg.endTime) {
-        const segId = `${seg.startTime}-${seg.script}`;
-        if (this.lastSpokenSegmentId !== segId) {
-          this.lastSpokenSegmentId = segId;
-
-          if (!seg.audioData || !this.compiledAdTrackUrl) {
-            console.log(`[PlaybackController] Fallback local TTS: "${seg.script}"`);
-            if (this.currentUtterance) {
-              window.speechSynthesis.cancel();
-            }
-            const utterance = new SpeechSynthesisUtterance(seg.script);
-            utterance.volume = 1;
-            utterance.rate = 1;
-            const voices = window.speechSynthesis.getVoices();
-            if (voices && voices.length > 0) {
-              utterance.voice = voices.find(v => v.lang.startsWith('en')) || voices[0];
-            }
-            this.currentUtterance = utterance;
-            window.speechSynthesis.speak(utterance);
-          }
-        }
-        break;
       }
     }
   }
@@ -292,10 +263,6 @@ export class AppController {
   private resetVideoState() {
     this.adAudio.pause();
     this.adAudio.src = '';
-    this.lastSpokenSegmentId = null;
-    if (this.currentUtterance) {
-      window.speechSynthesis.cancel();
-    }
     appState.set('adSegments', []);
     appState.set('conversationLog', []);
     if (this.onScriptUpdateCallback) {
@@ -305,7 +272,7 @@ export class AppController {
 
   // --- Script Updating ---
 
-  public syncScriptSegments(scriptText: string) {
+  public syncScriptSegments(scriptText: string, regenerateAudio = true) {
     const videoId = appState.get('currentVideoId');
     if (!videoId) return;
 
@@ -316,7 +283,9 @@ export class AppController {
 
     appState.set('adSegments', comparedSegments);
     void storeLatestAdScriptToDB(videoId, scriptText);
-    void adAudioManager.regenerateAdAudio();
+    if (regenerateAudio) {
+      void adAudioManager.regenerateAdAudio();
+    }
   }
 
   // --- Hotkeys Actions & API Gating ---
@@ -325,13 +294,41 @@ export class AppController {
     void this.hotkeyManager.init(actions);
   }
 
+  private shouldBlockPlaybackWhileGenerating(): boolean {
+    const speakAdText = appState.get('speakAdText') ?? true;
+    if (!speakAdText) return false;
+    if (appState.get('isAdAudioGenerating')) return true;
+    const segments = (appState.get('adSegments') || []).filter((s) => s.script.trim() !== '');
+    if (segments.length === 0) return false;
+    return segments.some((s) => !s.audioData && !s.generationFailed);
+  }
+
+  private alertSpeechGenerating() {
+    appState.set('statusMessage', 'Speech is still generating. Please wait a moment before playing.');
+    void showConfirm(
+      'Speech Still Generating',
+      'Audio description speech is still being generated. Please wait a moment before playing.',
+      'OK',
+      '',
+    );
+  }
+
   public async togglePlayPause() {
     const player = appState.get('videoPlayerApi');
     if (!player) return;
 
     const isPaused = appState.get('isVideoPaused');
     if (isPaused) {
-      // Trigger audio generation in the background (non-blocking)
+      if (this.shouldBlockPlaybackWhileGenerating()) {
+        if (!appState.get('isAdAudioGenerating')) {
+          void adAudioManager.regenerateAdAudio();
+        }
+        player.pause();
+        appState.set('isVideoPaused', true);
+        this.alertSpeechGenerating();
+        return;
+      }
+      // Trigger audio generation in the background if needed
       void adAudioManager.regenerateAdAudio();
     }
 
@@ -365,6 +362,13 @@ export class AppController {
     const jumpTime = Math.max(player.currentTime - 5, 0);
     player.seek(jumpTime);
     appState.set('statusMessage', `Rewound to ${formatTimeForScreenReader(jumpTime)}.`);
+  }
+
+  public jumpToStart() {
+    const player = appState.get('videoPlayerApi');
+    if (!player) return;
+    player.seek(0);
+    appState.set('statusMessage', 'Jumped to beginning of video.');
   }
 
   public async clearVideoData() {
@@ -518,10 +522,12 @@ export class AppController {
       const onError = (error: unknown) => {
         console.error('AI Error:', error);
         const source = provider === 'openai' ? 'OpenAI' : model;
-        const hint = provider === 'gemini' && !EMBEDDED_GEMINI_API_KEY
+        const hint = provider === 'gemini' && !getInjectedGeminiApiKey()
           ? ' You can try a different model in Settings.' : '';
+        const errMsg = describeError(error).replace(/\.?$/, '.');
+        appState.set('statusMessage', `Error from ${source}: ${errMsg}`);
         this.appendAgentMessage(
-          `⚠️ Error from ${source}: ${describeError(error).replace(/\.?$/, '.')}${hint}`, videoId, false);
+          `⚠️ Error from ${source}: ${errMsg}${hint}`, videoId, false);
         this.activeRequest = null;
         appState.set('isAgentResponding', false);
       };
@@ -583,7 +589,6 @@ export class AppController {
       const segments = appState.get('adSegments') || [];
 
       if (type === 'webvtt') {
-        const { formatTimeForVttFull } = await import('../../core/time_utils');
         let vtt = "WEBVTT\n\n";
         segments.forEach((seg, i) => {
           vtt += `${i + 1}\n${formatTimeForVttFull(seg.startTime)} --> ${formatTimeForVttFull(seg.endTime)}\n${seg.script}\n\n`;
@@ -620,6 +625,19 @@ export class AppController {
         this.triggerDownload(url, `${videoId}_mixed.${exporter.fileExtension}`);
         URL.revokeObjectURL(url);
         appState.set('statusMessage', 'Mixed video export complete.');
+      } else if (type === 'all') {
+        await this.exportFile('webvtt', localVideoFile);
+        const compiledTrack = appState.get('compiledAdTrackUrl');
+        if (compiledTrack) {
+          await this.exportFile('audio', localVideoFile);
+        }
+        if (localVideoFile && compiledTrack) {
+          const exporter = await getVideoExporter().catch(() => null);
+          if (exporter && (await exporter.isSupported().catch(() => false))) {
+            await this.exportFile('video', localVideoFile);
+          }
+        }
+        appState.set('statusMessage', 'All available project exports complete.');
       }
     } catch (e: unknown) {
       console.error(e);
@@ -675,26 +693,31 @@ export class AppController {
     speechModel?: string;
     hotkeys?: HotkeyConfigEntry[];
   }) {
-    if (settings.geminiApiKey !== undefined) {
-      appState.set('geminiApiKey', settings.geminiApiKey);
-    }
-    if (settings.openaiApiKey !== undefined) {
-      appState.set('openaiApiKey', settings.openaiApiKey);
-    }
-    if (settings.llmProvider !== undefined) {
-      appState.set('llmProvider', settings.llmProvider);
+    const hasInjectedKey = Boolean(getInjectedGeminiApiKey());
+    if (!hasInjectedKey) {
+      if (settings.geminiApiKey !== undefined) {
+        appState.set('geminiApiKey', settings.geminiApiKey);
+      }
+      if (settings.openaiApiKey !== undefined) {
+        appState.set('openaiApiKey', settings.openaiApiKey);
+      }
+      if (settings.llmProvider !== undefined) {
+        appState.set('llmProvider', settings.llmProvider);
+      }
+      if (settings.agentModel !== undefined) {
+        appState.set('agentModel', settings.agentModel.trim());
+      }
+      if (settings.speechModel !== undefined) {
+        appState.set('speechModel', settings.speechModel.trim());
+      }
+    } else {
+      appState.set('llmProvider', 'gemini');
     }
     if (settings.ttsLanguage !== undefined) {
       appState.set('ttsLanguage', settings.ttsLanguage);
     }
     if (settings.ttsVoice !== undefined) {
       appState.set('ttsVoice', settings.ttsVoice);
-    }
-    if (settings.agentModel !== undefined) {
-      appState.set('agentModel', settings.agentModel.trim());
-    }
-    if (settings.speechModel !== undefined) {
-      appState.set('speechModel', settings.speechModel.trim());
     }
 
     if (settings.hotkeys) {

@@ -1,0 +1,5 @@
+{
+  "name": "AD Script Assist",
+  "description": "An AI-driven interactive helper for creating, editing, and mixing audio descriptions (AD) for videos.",
+  "requestFramePermissions": []
+}

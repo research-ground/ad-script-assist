@@ -76,7 +76,12 @@ export class AgentInput extends LitElement {
         color: var(--primary-text, #000000);
         box-sizing: border-box;
         font-size: 1em;
-        outline: none;
+      }
+
+      input:focus-visible,
+      button:focus-visible {
+        outline: 2px solid var(--accent-color, #1a73e8);
+        outline-offset: 2px;
       }
 
       input::placeholder {

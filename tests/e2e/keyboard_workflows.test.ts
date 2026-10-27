@@ -92,6 +92,23 @@ async function waitForAgentResponse(page: puppeteer.Page) {
   }, { timeout: 120000 });
 }
 
+// Helper to wait for AD speech generation to complete
+async function waitForSpeechGeneration(page: puppeteer.Page) {
+  await page.waitForFunction(() => {
+    const state = (window as any).appState;
+    if (!state || state.get('isAdAudioGenerating')) return false;
+    const segs = (state.get('adSegments') || []).filter((s: any) => s.script && s.script.trim().length > 0);
+    return segs.every((s: any) => Boolean(s.audioData) || Boolean(s.generationFailed));
+  }, { timeout: 120000 });
+}
+
+async function getSegmentsSummary(page: puppeteer.Page): Promise<string> {
+  return page.evaluate(() => {
+    const segs = (window as any).appState?.get('adSegments') || [];
+    return segs.map((s: any) => s.script).join('\n');
+  });
+}
+
 // Helper to clear localStorage and clean state
 async function clearAppState(page: puppeteer.Page) {
   await page.evaluate(() => {
@@ -176,15 +193,10 @@ test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
     await pressHotkey(page, '4'); // focus out to blur and sync
     await new Promise(r => setTimeout(r, 1000));
 
-    console.log('6. Verifying in Debug Panel');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Toggle Debug"]');
-    await page.waitForSelector('main-page >>> debug-panel', { visible: true, timeout: 5000 });
-
-    const debugText = await page.evaluate(() => {
-      const debugPanel = document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel');
-      return debugPanel?.shadowRoot?.innerHTML || '';
-    });
-    assert.ok(debugText.includes('Keyboard Edit Test.'), 'Debug panel must reflect the edited segment');
+    console.log('6. Verifying parsed segments');
+    const segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Keyboard Edit Test.'), 'Segments must reflect the edited segment');
+    await waitForSpeechGeneration(page);
 
     console.log('7. Playing audio and checking events');
     await pressHotkey(page, '1'); // ctrl+1 to play
@@ -316,15 +328,10 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
     await pressHotkey(page, '4');
     await new Promise(r => setTimeout(r, 1000));
 
-    console.log('6. Verifying in Debug Panel');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Toggle Debug"]');
-    await page.waitForSelector('main-page >>> debug-panel', { visible: true, timeout: 5000 });
-
-    const debugText = await page.evaluate(() => {
-      const debugPanel = document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel');
-      return debugPanel?.shadowRoot?.innerHTML || '';
-    });
-    assert.ok(debugText.includes('Keyboard ChatGPT Edit.'), 'Debug panel must reflect the edited segment');
+    console.log('6. Verifying parsed segments');
+    const segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Keyboard ChatGPT Edit.'), 'Segments must reflect the edited segment');
+    await waitForSpeechGeneration(page);
 
     console.log('7. Playing audio and checking events');
     await pressHotkey(page, '1');
@@ -407,15 +414,9 @@ test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
     await pressHotkey(page, '4');
     await new Promise(r => setTimeout(r, 1000));
 
-    console.log('6. Verifying in Debug Panel');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Toggle Debug"]');
-    await page.waitForSelector('main-page >>> debug-panel', { visible: true, timeout: 5000 });
-
-    const debugText = await page.evaluate(() => {
-      const debugPanel = document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel');
-      return debugPanel?.shadowRoot?.innerHTML || '';
-    });
-    assert.ok(debugText.includes('Keyboard YouTube Edit.'), 'Debug panel must reflect the edited segment');
+    console.log('6. Verifying parsed segments');
+    const segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Keyboard YouTube Edit.'), 'Segments must reflect the edited segment');
 
     console.log('✅ Workflow 3 Passed!');
   } finally {
@@ -479,15 +480,10 @@ test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (
     });
     assert.ok(editorText.includes('Reload Persistence Test.'), 'Script must persist after reload');
 
-    // Open debug panel and verify segments loaded
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Toggle Debug"]');
-    await page.waitForSelector('main-page >>> debug-panel', { visible: true, timeout: 5000 });
-
-    const debugText = await page.evaluate(() => {
-      const debugPanel = document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel');
-      return debugPanel?.shadowRoot?.innerHTML || '';
-    });
-    assert.ok(debugText.includes('Reload Persistence Test.'), 'Debug panel must load segments correctly after reload');
+    // Verify segments loaded after reload
+    const segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Reload Persistence Test.'), 'Segments must load correctly after reload');
+    await waitForSpeechGeneration(page);
 
     // Playback verification
     await pressHotkey(page, '1');
@@ -529,11 +525,7 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     await waitForAddVideoModalToClose(page);
     await page.waitForSelector('main-page >>> video-player', { timeout: 15000 });
 
-    console.log('2. Opening Debug Panel');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Toggle Debug"]');
-    await page.waitForSelector('main-page >>> debug-panel', { visible: true, timeout: 5000 });
-
-    console.log('3. Editing script: inserting initial WebVTT');
+    console.log('2. Editing script: inserting initial WebVTT');
     await pressHotkey(page, '5');
     await page.keyboard.down('Meta');
     await page.keyboard.press('A');
@@ -543,8 +535,8 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     await pressHotkey(page, '4'); // blur to sync
     await new Promise(r => setTimeout(r, 1000));
 
-    let debugText = await page.evaluate(() => document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel')?.shadowRoot?.innerHTML || '');
-    assert.ok(debugText.includes('Line 1') && debugText.includes('Line 2'), 'Debug panel must show 2 segments');
+    let segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Line 1') && segsText.includes('Line 2'), 'Must show 2 segments');
 
     console.log('4. Editing script: adding Line 3 at the end');
     await pressHotkey(page, '5');
@@ -556,8 +548,8 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     await pressHotkey(page, '4'); // blur
     await new Promise(r => setTimeout(r, 1000));
 
-    debugText = await page.evaluate(() => document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel')?.shadowRoot?.innerHTML || '');
-    assert.ok(debugText.includes('Line 3'), 'Debug panel must show Line 3');
+    segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Line 3'), 'Must show Line 3');
 
     console.log('5. Editing script: modifying Line 2 text');
     await pressHotkey(page, '5');
@@ -573,8 +565,8 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     await pressHotkey(page, '4'); // blur
     await new Promise(r => setTimeout(r, 1000));
 
-    debugText = await page.evaluate(() => document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel')?.shadowRoot?.innerHTML || '');
-    assert.ok(debugText.includes('Line 2 Edited'), 'Debug panel must show Line 2 Edited');
+    segsText = await getSegmentsSummary(page);
+    assert.ok(segsText.includes('Line 2 Edited'), 'Must show Line 2 Edited');
 
     console.log('6. Editing script: breaking syntax of Line 1');
     await pressHotkey(page, '5');
@@ -592,9 +584,9 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     await pressHotkey(page, '4'); // blur
     await new Promise(r => setTimeout(r, 1000));
 
-    debugText = await page.evaluate(() => document.querySelector('main-page')?.shadowRoot?.querySelector('debug-panel')?.shadowRoot?.innerHTML || '');
-    assert.ok(!debugText.includes('Line 1'), 'Line 1 must be removed from segments list due to syntax error');
-    assert.ok(debugText.includes('Line 2 Edited') && debugText.includes('Line 3'), 'Other segments must remain');
+    segsText = await getSegmentsSummary(page);
+    assert.ok(!segsText.includes('Line 1'), 'Line 1 must be removed from segments list due to syntax error');
+    assert.ok(segsText.includes('Line 2 Edited') && segsText.includes('Line 3'), 'Other segments must remain');
 
     console.log('✅ Workflow 5 Passed!');
   } finally {
@@ -638,6 +630,7 @@ test('Workflow 6: Keyboard focus test (YT + Gemini only) (Keyboard navigation)',
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nLine 1 Text.\n\n00:00:06.000 --> 00:00:10.000\nLine 2 Text.\n');
     await pressHotkey(page, '4'); // blur to sync
     await new Promise(r => setTimeout(r, 1000));
+    await waitForSpeechGeneration(page);
 
     console.log('3. Navigating editor cursor');
     await pressHotkey(page, '5'); // focus editor

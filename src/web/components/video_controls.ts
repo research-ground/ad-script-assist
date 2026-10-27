@@ -105,6 +105,8 @@ export class VideoControls extends LitElement {
       }
       button {
         flex-grow: 1;
+        min-width: 44px;
+        min-height: 44px;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -120,6 +122,10 @@ export class VideoControls extends LitElement {
         transition:
           background-color 0.25s,
           transform 0.1s;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent-color, #0078d4);
+        outline-offset: 2px;
       }
       button:hover {
         background-color: #005a9e;
@@ -178,6 +184,16 @@ export class VideoControls extends LitElement {
   override render() {
     return html`
       <div class="controls-container">
+        <button
+          id="restartButton"
+          @click=${() => {
+            this.dispatch('restart');
+          }}
+          ?disabled=${!this.isVideoLoaded}
+          aria-label="Go to beginning of video"
+          title="Go to beginning of video (0:00)">
+          <span class="material-icons">skip_previous</span>
+        </button>
         <button
           id="rewindButton"
           @click=${() => {

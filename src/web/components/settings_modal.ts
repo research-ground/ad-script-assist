@@ -26,7 +26,7 @@ import {
   AGENT_MODEL_SUGGESTIONS,
   DEFAULT_AGENT_MODEL,
   DEFAULT_SPEECH_MODEL,
-  EMBEDDED_GEMINI_API_KEY,
+  getInjectedGeminiApiKey,
   SPEECH_MODEL_SUGGESTIONS,
   TTS_LANGUAGES,
 } from '../../core/constants';
@@ -277,7 +277,7 @@ export class SettingsModal extends LitElement {
 
   override render() {
     return html`
-      <dialog>
+      <dialog aria-labelledby="settings-title">
         <button
           class="close-button"
           @click=${this.close}
@@ -286,7 +286,7 @@ export class SettingsModal extends LitElement {
         </button>
         <div class="container">
           <div class="header">
-            <h1>Settings</h1>
+            <h1 id="settings-title">Settings</h1>
           </div>
 
           ${this.isLoadingConfigs ? html`
@@ -299,8 +299,8 @@ export class SettingsModal extends LitElement {
                 <div class="section-header">
                   <h2>AI Provider</h2>
                 </div>
-              ${EMBEDDED_GEMINI_API_KEY ? html`
-              <p style="padding: 10px; margin: 0;">This demo uses Google Gemini with a preconfigured API key.</p>
+              ${getInjectedGeminiApiKey() ? html`
+              <p style="padding: 10px; margin: 0;">This app is using a preconfigured Google Gemini API key.</p>
               ` : html`
               <div class="api-key-container" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
                 <div>
@@ -322,7 +322,8 @@ export class SettingsModal extends LitElement {
                   <input
                     id="api-key-input"
                     type="password"
-                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;"
+                    aria-describedby="gemini-key-help"
+                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
                     .value=${this.currentApiKey}
                     @input=${(e: Event) => {
                       if (e.target instanceof HTMLInputElement) {
@@ -331,6 +332,9 @@ export class SettingsModal extends LitElement {
                     }}
                     placeholder="Enter your Gemini API Key"
                   />
+                  <div id="gemini-key-help" class="help-text" style="margin-top: 4px;">
+                    Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Stored locally in your browser.
+                  </div>
                 </div>
 
                 <div>
@@ -338,7 +342,8 @@ export class SettingsModal extends LitElement {
                   <input
                     id="openai-api-key-input"
                     type="password"
-                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;"
+                    aria-describedby="openai-key-help"
+                    style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
                     .value=${this.currentOpenAiApiKey}
                     @input=${(e: Event) => {
                       if (e.target instanceof HTMLInputElement) {
@@ -347,6 +352,9 @@ export class SettingsModal extends LitElement {
                     }}
                     placeholder="Enter your OpenAI API Key"
                   />
+                  <div id="openai-key-help" class="help-text" style="margin-top: 4px;">
+                    Get a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>. Stored locally in your browser.
+                  </div>
                 </div>
 
                 ${this.renderModelInput('agent-model-input', 'Gemini model', this.currentAgentModel,
@@ -396,13 +404,16 @@ export class SettingsModal extends LitElement {
                     return html`
                       <div
                         class="hotkey-item ${isChanged ? 'row-changed' : ''}">
-                        <div class="hotkey-description"
+                        <div
+                          id="hotkey-desc-${index}"
+                          class="hotkey-description"
                           >${hotkey.description}</div
                         >
                         <div class="hotkey-default-combo">${defaultCombo}</div>
                         <input
                           type="text"
                           class="hotkey-input-keycombo"
+                          aria-labelledby="hotkey-desc-${index}"
                           .value=${hotkey.keyCombo}
                           @input=${(e: Event) => {
                             this.handleKeyComboInput(e, index);

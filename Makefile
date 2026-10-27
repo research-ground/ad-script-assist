@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: all build dev serve make-for-aistudio
+.PHONY: all setup build dev start serve clean make-for-aistudio
 
 # Default target
 all: build
+
+# Install dependencies
+setup:
+	npm install
 
 # 1. Build with Vite
 build:
@@ -27,10 +31,15 @@ dev:
 	@echo "Starting Vite dev server..."
 	npm run dev
 
+start: dev
+
 # Build and run a local server (production preview)
 serve: build
 	@echo "Starting Vite production preview..."
 	npx vite preview
+
+clean:
+	rm -rf dist ad-script-assist-aistudio.zip
 
 # Create a clean zip archive of tracked files for Google AI Studio import
 make-for-aistudio:

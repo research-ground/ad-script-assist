@@ -92,7 +92,6 @@ test('Accessibility: All controls are reachable via Tab key', async (t) => {
     assert.ok(focusedElements.has('Settings'), 'Settings button should be reachable via Tab');
     assert.ok(focusedElements.has('Help'), 'Help button should be reachable via Tab');
     assert.ok(focusedElements.has('Export Menu'), 'Export Menu button should be reachable via Tab');
-    assert.ok(focusedElements.has('Toggle Debug'), 'Toggle Debug button should be reachable via Tab');
     assert.ok(focusedElements.has('Clear Project'), 'Clear Project button should be reachable via Tab');
     
     // Assert Video Controls

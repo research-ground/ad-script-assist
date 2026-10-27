@@ -18,6 +18,7 @@ import { AdSegment, ConversationEntry } from '../core/types';
 import { appState } from '../core/app_state';
 import { AdGenerator } from '../ai/ad_generator';
 import { describeError } from '../ai/describe_error';
+import { setTtsFallbackListener } from '../ai/tts_client';
 import { compileADAudioTrack } from './audio_utils';
 import { addConversationEntryToDB, storeAdSegmentsToDB } from '../web/storage/db';
 
@@ -28,6 +29,8 @@ export class AdAudioManager {
   private isProcessingAudio = false;
   private failedCount = 0;
   private lastError: unknown = null;
+  private batchFallbackVoice: string | null = null;
+  private fallbackReason: unknown = null;
 
   constructor() {
     appState.subscribe('isAgentResponding', (isResponding) => {
@@ -85,17 +88,27 @@ export class AdAudioManager {
     const currentVideoId = appState.get('currentVideoId');
     if (!currentVideoId) return;
 
+    const segments = appState.get('adSegments') || [];
+    const workingSegments = [...segments];
+    const nonEmptySegments = workingSegments.filter(seg => seg.script.trim().length > 0);
+    const totalCues = nonEmptySegments.length;
+
+    if (totalCues === 0) {
+      appState.set('compiledAdTrackUrl', null);
+      return;
+    }
+
+    const hasChanges = nonEmptySegments.some(seg => seg.changed || !seg.audioData);
+    if (!hasChanges && appState.get('compiledAdTrackUrl')) {
+      return;
+    }
+
     this.isProcessingAudio = true;
     appState.set('isAdAudioGenerating', true);
     appState.set('statusMessage', 'Generating audio segments...');
     this.hasPendingChange = false;
 
     try {
-      // Fetch latest segments from appState here to avoid stale closures
-      const segments = appState.get('adSegments') || [];
-      const workingSegments = [...segments];
-
-      const hasChanges = workingSegments.some(seg => seg.changed || !seg.audioData);
       if (hasChanges) {
         appState.set('compiledAdTrackUrl', null);
       }
@@ -103,23 +116,68 @@ export class AdAudioManager {
       // Process segments in small batches
       this.failedCount = 0;
       this.lastError = null;
+      this.batchFallbackVoice = null;
+      this.fallbackReason = null;
+
+      setTtsFallbackListener((reason, fallbackVoice) => {
+        if (!this.batchFallbackVoice) {
+          this.batchFallbackVoice = fallbackVoice;
+          this.fallbackReason = reason;
+        }
+      });
+
       const CONCURRENCY_LIMIT = 3;
       for (let i = 0; i < workingSegments.length; i += CONCURRENCY_LIMIT) {
         const batch = workingSegments.slice(i, i + CONCURRENCY_LIMIT);
-        await Promise.all(batch.map((seg) => this.generateAudioForSingleSegment(seg)));
+        await Promise.all(
+          batch.map(async (seg) => {
+            await this.generateAudioForSingleSegment(seg);
+            const readyCues = nonEmptySegments.filter(s => Boolean(s.audioData)).length;
+            const currentSegs = appState.get('adSegments') || [];
+            const updatedSegs = currentSegs.map((s) =>
+              s.startTime === seg.startTime &&
+              s.endTime === seg.endTime &&
+              s.script === seg.script
+                ? {
+                    ...s,
+                    audioData: seg.audioData,
+                    generationFailed: seg.generationFailed,
+                    changed: false,
+                  }
+                : s,
+            );
+            appState.set('adSegments', updatedSegs);
+            if (totalCues > 0) {
+              appState.set('statusMessage', `Generating speech (${readyCues}/${totalCues})...`);
+            }
+          }),
+        );
       }
+
+      setTtsFallbackListener(null);
+
+      if (this.batchFallbackVoice && this.fallbackReason) {
+        const reasonStr = describeError(this.fallbackReason);
+        if (!reasonStr.includes('API key configured')) {
+          this.postErrorToChat(
+            currentVideoId,
+            `ℹ️ Cloud TTS failed (${reasonStr}); fell back to local Kokoro voice (${this.batchFallbackVoice}).`,
+          );
+        }
+      }
+
       if (this.failedCount > 0) {
         this.postErrorToChat(currentVideoId,
           `⚠️ Couldn't generate audio for ${this.failedCount} segment(s): ${describeError(this.lastError)}`);
       }
 
-      appState.set('adSegments', workingSegments);
-      await storeAdSegmentsToDB(currentVideoId, workingSegments);
+      const finalSegments = appState.get('adSegments') || [];
+      await storeAdSegmentsToDB(currentVideoId, finalSegments);
 
       // Compile track
       const videoApi = appState.get('videoPlayerApi');
       const duration = videoApi?.duration || 0;
-      const newTrack = await compileADAudioTrack(workingSegments, duration);
+      const newTrack = await compileADAudioTrack(finalSegments, duration);
       
       if (newTrack) {
         appState.set('compiledAdTrackUrl', newTrack);
@@ -127,10 +185,11 @@ export class AdAudioManager {
       
       // Dispatch custom event on window for compatibility with older code, or they can just listen to compiledAdTrackUrl
       window.dispatchEvent(new CustomEvent('ad-audio-updated', {
-        detail: { segments: workingSegments, trackUrl: newTrack }
+        detail: { segments: finalSegments, trackUrl: newTrack }
       }));
 
     } finally {
+      setTtsFallbackListener(null);
       this.isProcessingAudio = false;
       appState.set('isAdAudioGenerating', false);
       if (!this.hasPendingChange) {
@@ -162,7 +221,10 @@ export class AdAudioManager {
     }
 
     try {
-      const audioData = await this.adGenerator.generateAudioForSegment(seg.script);
+      const audioData = await this.adGenerator.generateAudioForSegment(
+        seg.script,
+        this.batchFallbackVoice || undefined,
+      );
 
       Object.assign(seg, {
         audioData: audioData || undefined,

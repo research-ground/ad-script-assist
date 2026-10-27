@@ -14,15 +14,39 @@
  limitations under the License.
  */
 
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig({
-  // Relative asset paths so the build works under a subpath (GitHub Pages).
-  base: './',
-  build: {
-    outDir: 'dist',
-  },
-  server: {
-    port: 3000,
-  }
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', '');
+  const injectedGeminiKey = (
+    env.VITE_GEMINI_API_KEY ||
+    env.GEMINI_API_KEY ||
+    env.API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.API_KEY ||
+    ''
+  ).trim();
+
+  return {
+    root: '.',
+    base: './',
+    define: {
+      __AD_SCRIPT_ASSIST_GEMINI_API_KEY__: JSON.stringify(injectedGeminiKey),
+    },
+    worker: {
+      format: 'es',
+    },
+    optimizeDeps: {
+      exclude: ['kokoro-js', '@huggingface/transformers', 'onnxruntime-web'],
+    },
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+    },
+    server: {
+      port: 3000,
+      open: true,
+    },
+  };
 });

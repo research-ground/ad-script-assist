@@ -20,7 +20,7 @@
  */
 
 import {AdSegment, VideoPlayerApi, ConversationEntry} from './types';
-import {EMBEDDED_GEMINI_API_KEY} from './constants';
+import {getInjectedGeminiApiKey} from './constants';
 
 /** Supported application states. */
 export interface AppState {
@@ -131,12 +131,13 @@ class AppStateManager {
   constructor() {
     // Load User Settings from localStorage immediately
     if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      const hasInjectedKey = Boolean(getInjectedGeminiApiKey());
       this.state.geminiApiKey = localStorage.getItem('userSettings_geminiApiKey') || '';
       this.state.openaiApiKey = localStorage.getItem('userSettings_openaiApiKey') || '';
       this.state.llmProvider = (localStorage.getItem('userSettings_llmProvider') as 'gemini' | 'openai') || 'gemini';
-      if (EMBEDDED_GEMINI_API_KEY) this.state.llmProvider = 'gemini'; // Demo build: locked to Gemini.
+      if (hasInjectedKey) this.state.llmProvider = 'gemini'; // Injected key / AI Studio: locked to Gemini.
       this.state.ttsLanguage = localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
-      if (!EMBEDDED_GEMINI_API_KEY) { // Demo build: always the default models.
+      if (!hasInjectedKey) { // Injected key / AI Studio: always the default models.
         this.state.agentModel = localStorage.getItem('userSettings_agentModel') || '';
         this.state.speechModel = localStorage.getItem('userSettings_speechModel') || '';
       }

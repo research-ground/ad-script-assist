@@ -121,8 +121,10 @@ export class VideoUrlInput extends LitElement {
   override render() {
     return html`
       <div>
+        <label for="yt-input" style="display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px;">YouTube Video URL</label>
         <div class="input-container">
           <input
+            id="yt-input"
             type="text"
             placeholder="Paste YouTube URL here..."
             .value="${this.url}"

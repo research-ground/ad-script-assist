@@ -72,6 +72,7 @@ export class AgentChat extends LitElement {
       align-self: flex-end;
       max-width: 80%;
       word-wrap: break-word;
+      white-space: pre-wrap;
     }
 
     .agent-message {
@@ -84,6 +85,30 @@ export class AgentChat extends LitElement {
       align-self: flex-start;
       max-width: 80%;
       word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .empty-chat-state {
+      padding: 16px;
+      margin: 8px 0;
+      border: 1px dashed var(--border-color, #dadce0);
+      border-radius: 8px;
+      background-color: var(--tertiary-bg, #f8f9fa);
+      color: var(--secondary-text, #5f6368);
+      font-size: 0.85rem;
+      line-height: 1.5;
     }
 
     .system-message {
@@ -173,12 +198,24 @@ export class AgentChat extends LitElement {
   }
 
   override render() {
+    const visibleEntries = this.conversationLog.filter((e) => !e.trashed);
     return html`
-      <div class="chat-container" id="conversationHistory">
+      <div
+        class="chat-container"
+        id="conversationHistory"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions">
+        ${visibleEntries.length === 0 && !this.isResponding
+          ? html`
+              <div class="empty-chat-state" role="note">
+                <strong>AI Assistant Ready</strong><br />
+                Ask questions about the video, click <em>(Re)Generate AD</em> to draft a full WebVTT script, or request edits to specific cues.
+              </div>
+            `
+          : ''}
         <ul>
-          ${this.conversationLog.map((entry) => {
-            if (entry.trashed) return null;
-
+          ${visibleEntries.map((entry) => {
             let className = 'system-message';
             let prefix = '';
 
@@ -192,7 +229,7 @@ export class AgentChat extends LitElement {
 
             return html`
               <li class="${className}">
-                <span class="visually-hidden">${prefix}</span>
+                ${prefix ? html`<h3 class="visually-hidden">${prefix}</h3>` : ''}
                 <span>${entry.message}</span>
               </li>
             `;

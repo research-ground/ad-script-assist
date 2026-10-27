@@ -15,31 +15,77 @@
  */
 
 import {ttsCache} from '../web/storage/tts_cache';
-import {getAI} from './gemini_client';
+import {getAI, resolveGeminiApiKey} from './gemini_client';
 import {getOpenAIApiKey} from './openai_client';
+import {generateKokoroPcm} from './kokoro_tts';
 import {appState} from '../core/app_state';
-import {DEFAULT_SPEECH_MODEL} from '../core/constants';
+import {DEFAULT_KOKORO_VOICE, DEFAULT_SPEECH_MODEL, isKokoroVoice} from '../core/constants';
+
+export interface TtsFallbackListener {
+  (reason: unknown, fallbackVoice: string): void;
+}
+
+let onCloudFallbackListener: TtsFallbackListener | null = null;
+
+/** Registers a listener invoked when cloud TTS fails and falls back to local Kokoro TTS. */
+export function setTtsFallbackListener(listener: TtsFallbackListener | null) {
+  onCloudFallbackListener = listener;
+}
+
+async function synthesizeWithKokoro(
+  text: string,
+  voiceName: string,
+  speed: number,
+): Promise<string> {
+  const kokoroVoice = isKokoroVoice(voiceName) ? voiceName : DEFAULT_KOKORO_VOICE;
+  const cachedBlob = await ttsCache.get(text, kokoroVoice, speed);
+  if (cachedBlob) {
+    return blobToBase64(cachedBlob);
+  }
+
+  console.log(`[TTS Local] Generating Kokoro audio (${kokoroVoice}) for text: "${text}"`);
+  const {pcmBytes, sampleRate} = await generateKokoroPcm(text, kokoroVoice, speed);
+  const wavBlob = pcmToWavBlob(pcmBytes, sampleRate, 1);
+  await ttsCache.add(text, kokoroVoice, speed, wavBlob);
+  return blobToBase64(wavBlob);
+}
 
 /**
  * Generates Text-to-Speech audio from the provided text.
- * @param text The text to convert to speech.
+ * Supports local Kokoro voices directly and automatically falls back to
+ * `DEFAULT_KOKORO_VOICE` (`af_heart`) if cloud TTS is unconfigured or fails.
  */
 export async function generateTTS(
   text: string,
-  voiceName: string = 'en-US-Journey-F',
+  voiceName: string = 'Aoede',
   speed: number = 1.0,
   provider?: string,
 ): Promise<string> {
-  const llmProvider = provider || (typeof window !== 'undefined' ? appState.get('llmProvider') : 'gemini') || 'gemini';
+  if (isKokoroVoice(voiceName)) {
+    return synthesizeWithKokoro(text, voiceName, speed);
+  }
 
   const cachedBlob = await ttsCache.get(text, voiceName, speed);
   if (cachedBlob) {
     return blobToBase64(cachedBlob);
   }
 
-  const ai = await getAI();
+  const llmProvider = provider || (typeof window !== 'undefined' ? appState.get('llmProvider') : 'gemini') || 'gemini';
+
+  // If no API key is configured for the selected cloud provider, immediately fall back to local Kokoro TTS.
+  const hasCloudKey = llmProvider === 'openai'
+    ? Boolean(getOpenAIApiKey()?.trim())
+    : Boolean(resolveGeminiApiKey()?.trim());
+
+  if (!hasCloudKey) {
+    console.info(`[TTS] No ${llmProvider} API key configured; using local Kokoro voice (${DEFAULT_KOKORO_VOICE}).`);
+    onCloudFallbackListener?.(new Error(`No ${llmProvider} API key configured`), DEFAULT_KOKORO_VOICE);
+    return synthesizeWithKokoro(text, DEFAULT_KOKORO_VOICE, speed);
+  }
+
   const maxRetries = 2;
   let delay = 1000;
+  let lastCloudError: unknown = null;
 
   for (let i = 0; i <= maxRetries; i++) {
     try {
@@ -48,7 +94,7 @@ export async function generateTTS(
       } else {
         console.log(`[TTS Cloud] Requesting cloud audio generation for text: "${text}"`);
       }
-      
+
       if (llmProvider === 'openai') {
         const apiKey = getOpenAIApiKey();
         const response = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -67,7 +113,7 @@ export async function generateTTS(
         if (!response.ok) {
           throw new Error(`OpenAI TTS request failed: ${response.statusText}`);
         }
-        
+
         const arrayBuffer = await response.arrayBuffer();
         const audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
         await ttsCache.add(text, voiceName, speed, audioBlob);
@@ -90,14 +136,14 @@ export async function generateTTS(
 
         const candidate = response.candidates?.[0];
         const data = candidate?.content?.parts?.[0]?.inlineData;
-        
+
         if (data && data.data) {
           const binaryString = atob(data.data);
           const pcmBytes = new Uint8Array(binaryString.length);
           for (let j = 0; j < binaryString.length; j++) {
             pcmBytes[j] = binaryString.charCodeAt(j);
           }
-          
+
           const wavBlob = pcmToWavBlob(pcmBytes, 24000, 1);
           await ttsCache.add(text, voiceName, speed, wavBlob);
           console.log(`[TTS Cloud] Successfully generated and cached audio for: "${text}"`);
@@ -107,10 +153,10 @@ export async function generateTTS(
 
       throw new Error('No audio data received from API');
     } catch (error) {
+      lastCloudError = error;
       console.error(`[TTS Cloud] Error on attempt ${i} for text: "${text}":`, error);
       if (i === maxRetries) {
-        console.error('[TTS Cloud] Final error after all retries:', error);
-        throw error;
+        break;
       }
       console.warn(`[TTS Cloud] Attempt ${i} failed, retrying...`, error);
       const jitter = Math.random() * 200;
@@ -120,7 +166,13 @@ export async function generateTTS(
       delay *= 2;
     }
   }
-  throw new Error('Failed to generate TTS after all retries');
+
+  console.warn(
+    `[TTS Cloud] Cloud TTS failed after retries; falling back to local Kokoro voice (${DEFAULT_KOKORO_VOICE}):`,
+    lastCloudError,
+  );
+  onCloudFallbackListener?.(lastCloudError, DEFAULT_KOKORO_VOICE);
+  return synthesizeWithKokoro(text, DEFAULT_KOKORO_VOICE, speed);
 }
 
 function pcmToWavBlob(pcmData: Uint8Array, sampleRate: number, numChannels: number): Blob {
@@ -153,16 +205,6 @@ function writeString(view: DataView, offset: number, string: string) {
   for (let i = 0; i < string.length; i++) {
     view.setUint8(offset + i, string.charCodeAt(i));
   }
-}
-
-function base64ToBlob(base64: string, mimeType = 'audio/wav'): Blob {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], {type: mimeType});
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {

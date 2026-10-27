@@ -14,6 +14,8 @@
  limitations under the License.
  */
 
+declare const __AD_SCRIPT_ASSIST_GEMINI_API_KEY__: string | undefined;
+
 /** Defines the available Gemini model names. */
 export enum ModelName {
   GEMINI_2_5_PRO = 'gemini-2.5-pro',
@@ -36,6 +38,9 @@ export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_8_FLASH;
 /** The default Gemini model for AD speech (used when the provider is Gemini). */
 export const DEFAULT_SPEECH_MODEL = ModelName.GEMINI_3_1_FLASH_TTS;
 
+/** Default local Kokoro voice used when a local voice is selected or when cloud TTS falls back. */
+export const DEFAULT_KOKORO_VOICE = 'af_heart';
+
 /** Suggestions for the free-text model fields in Settings (any model name can be typed). */
 export const AGENT_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => !m.includes('tts'));
 export const SPEECH_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => m.includes('tts'));
@@ -52,22 +57,42 @@ export const TTS_LANGUAGES = [
 ];
 
 const GEMINI_VOICES = [
-  { name: 'Aoede', label: 'Aoede' },
-  { name: 'Charon', label: 'Charon' },
-  { name: 'Fenrir', label: 'Fenrir' },
-  { name: 'Kore', label: 'Kore' },
-  { name: 'Puck', label: 'Puck' },
+  { name: 'Aoede', label: 'Aoede (Cloud)' },
+  { name: 'Charon', label: 'Charon (Cloud)' },
+  { name: 'Fenrir', label: 'Fenrir (Cloud)' },
+  { name: 'Kore', label: 'Kore (Cloud)' },
+  { name: 'Puck', label: 'Puck (Cloud)' },
 ];
 
+export const KOKORO_VOICES = [
+  { name: 'af_heart', label: 'Heart (Kokoro Local)' },
+  { name: 'af_bella', label: 'Bella (Kokoro Local)' },
+  { name: 'af_nicole', label: 'Nicole (Kokoro Local)' },
+  { name: 'am_fenrir', label: 'Fenrir (Kokoro Local)' },
+  { name: 'am_michael', label: 'Michael (Kokoro Local)' },
+  { name: 'am_puck', label: 'Puck (Kokoro Local)' },
+  { name: 'bf_emma', label: 'Emma (Kokoro Local, UK)' },
+  { name: 'bm_george', label: 'George (Kokoro Local, UK)' },
+];
+
+const ALL_VOICES = [...GEMINI_VOICES, ...KOKORO_VOICES];
+
+const KOKORO_VOICE_SET = new Set(KOKORO_VOICES.map((v) => v.name));
+
+/** Returns true if the given voice identifier is a local Kokoro neural TTS voice. */
+export function isKokoroVoice(voiceName: string): boolean {
+  return KOKORO_VOICE_SET.has(voiceName) || /^(af|am|bf|bm)_/.test(voiceName);
+}
+
 export const TTS_VOICES: Record<string, {name: string, label: string}[]> = {
-  'en-US': GEMINI_VOICES,
-  'en-GB': GEMINI_VOICES,
-  'en-AU': GEMINI_VOICES,
-  'es-ES': GEMINI_VOICES,
-  'fr-FR': GEMINI_VOICES,
-  'de-DE': GEMINI_VOICES,
-  'it-IT': GEMINI_VOICES,
-  'ja-JP': GEMINI_VOICES,
+  'en-US': ALL_VOICES,
+  'en-GB': ALL_VOICES,
+  'en-AU': ALL_VOICES,
+  'es-ES': ALL_VOICES,
+  'fr-FR': ALL_VOICES,
+  'de-DE': ALL_VOICES,
+  'it-IT': ALL_VOICES,
+  'ja-JP': ALL_VOICES,
 };
 
 /** Threshold for audio speed adjustment. If the required speed is higher than this, it's considered high speed. */
@@ -95,8 +120,44 @@ export const GEMINI_WAITING_MESSAGES = [
 ];
 
 /**
- * Gemini API key embedded at build time (VITE_GEMINI_API_KEY), e.g. for a
- * hosted demo. When set, the app is locked to Gemini with this key: users
- * can't change the key or switch providers. Empty in normal builds and the CLI.
+ * Reads an environment variable injected by the host runtime (e.g. Google AI
+ * Studio `process.env.GEMINI_API_KEY` or `process.env.API_KEY`) or a global
+ * `__AD_SCRIPT_ASSIST_<KEY>__` shim.
  */
-export const EMBEDDED_GEMINI_API_KEY: string = import.meta.env?.VITE_GEMINI_API_KEY ?? '';
+function readInjectedEnv(key: string): string {
+  const g = globalThis as Record<string, unknown>;
+  const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
+  const fromProc = proc?.env?.[key];
+  if (typeof fromProc === 'string' && fromProc.trim() !== '') {
+    return fromProc.trim();
+  }
+  const winVal = g[`__AD_SCRIPT_ASSIST_${key}__`];
+  if (typeof winVal === 'string' && winVal.trim() !== '') {
+    return winVal.trim();
+  }
+  return '';
+}
+
+/**
+ * Returns the Gemini API key injected by the environment or host (Google AI
+ * Studio, `.env`, or `VITE_GEMINI_API_KEY`). When non-empty, the UI locks the
+ * provider to Gemini and hides API key and model settings.
+ */
+export function getInjectedGeminiApiKey(): string {
+  const fromVite = (
+    import.meta.env?.VITE_GEMINI_API_KEY ||
+    (typeof __AD_SCRIPT_ASSIST_GEMINI_API_KEY__ !== 'undefined' ? __AD_SCRIPT_ASSIST_GEMINI_API_KEY__ : '') ||
+    ''
+  ).trim();
+  if (fromVite) {
+    return fromVite;
+  }
+  return readInjectedEnv('GEMINI_API_KEY') || readInjectedEnv('API_KEY');
+}
+
+/**
+ * Gemini API key embedded at build time or injected by the host environment
+ * (e.g. Google AI Studio). When set, the app is locked to Gemini with this key:
+ * users can't change the key, models, or switch providers.
+ */
+export const EMBEDDED_GEMINI_API_KEY: string = getInjectedGeminiApiKey();

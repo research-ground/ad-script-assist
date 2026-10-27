@@ -218,4 +218,12 @@ export const styles = css`
   .action-button {
     font-size: 13px;
   }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--accent-color, #1a73e8);
+    outline-offset: 2px;
+  }
 `;

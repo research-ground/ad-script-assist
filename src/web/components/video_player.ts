@@ -62,7 +62,7 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
     }
     #videoTimeOverlay {
       position: absolute;
-      bottom: 10px;
+      top: 10px;
       right: 10px;
       background-color: rgba(0, 0, 0, 0.7);
       color: white;
@@ -273,7 +273,7 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
 
   override render() {
     return html`
-      <div id="player-container" inert>
+      <div id="player-container">
         ${!this.videoId && !this.localVideoFile
           ? html`<div id="placeholder">Load a video</div>`
           : ''}

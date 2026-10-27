@@ -19,10 +19,12 @@ import {customElement, query, state} from 'lit/decorators.js';
 
 import {appState} from '../../core/app_state';
 import {
+  formatTimeForOverlay,
   formatTimeForScreenReader,
 } from '../../core/time_utils';
 import type {AdSegment, AgentContext, AgentResponse} from '../../core/types';
 import {TTS_VOICES} from '../../core/constants';
+import {adAudioManager} from '../../av/ad_audio_manager';
 import {AppController} from '../controller/app_controller';
 
 import './ad_text_area';
@@ -47,7 +49,6 @@ import './video-url-input';
 import type {VideoUrlInput} from './video-url-input';
 import './top_bar';
 import type {TopBar} from './top_bar';
-import './debug_panel';
 
 /**
  * Main application component.
@@ -59,7 +60,9 @@ export class MainPage extends LitElement {
   @state() private localVideoFile?: File;
   @state() private isVideoPaused = true;
   @state() private currentTime = 0;
+  @state() private videoDuration = 0;
   @state() private statusMessage = 'Ready';
+  @state() private adSegments: AdSegment[] = [];
 
   @state() isAdTextAreaFocused = false;
   @state() isAdAudioGenerating = false;
@@ -68,11 +71,10 @@ export class MainPage extends LitElement {
   @state() speakAdText = true;
   @state() private scriptNotes = '';
 
-  @state() private showDebugPanel = false;
-
   @state() leftColWidth = 25;
   @state() rightColWidth = 25;
   private isResizing: 'left' | 'right' | null = null;
+  private scriptDebounceTimer?: ReturnType<typeof setTimeout>;
   
   // Component References
   @query('#videoPlayerComponent') videoPlayerComponent!: AdVideoPlayer;
@@ -199,8 +201,12 @@ export class MainPage extends LitElement {
       background-color: var(--border-color);
       transition: background-color 0.2s ease;
     }
-    .splitter:hover::after, .splitter:active::after {
+    .splitter:hover::after, .splitter:active::after, .splitter:focus-visible::after {
       background-color: var(--accent-color);
+    }
+    .splitter:focus-visible {
+      outline: 2px solid var(--accent-color);
+      outline-offset: -2px;
     }
 
     section {
@@ -262,7 +268,7 @@ export class MainPage extends LitElement {
       padding: 0;
     }
 
-    h1 {
+    h1, h2 {
       margin: -16px -16px 16px -16px;
       padding: 8px 16px;
       font-size: 0.75em;
@@ -275,6 +281,29 @@ export class MainPage extends LitElement {
       user-select: none;
     }
 
+    .video-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: -16px -16px 16px -16px;
+      padding: 8px 16px;
+      background-color: var(--tertiary-bg);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .video-section-header h2 {
+      margin: 0;
+      padding: 0;
+      border-bottom: none;
+      background: none;
+    }
+
+    .video-duration-badge {
+      font-size: 0.75em;
+      color: var(--secondary-text);
+      font-family: monospace;
+    }
+
     .ad-textarea-header {
       display: flex;
       align-items: center;
@@ -284,7 +313,7 @@ export class MainPage extends LitElement {
       padding: 8px 16px;
     }
     
-    .ad-textarea-header h1 {
+    .ad-textarea-header h1, .ad-textarea-header h2 {
       margin: 0;
       padding: 0;
       border-bottom: none;
@@ -294,9 +323,28 @@ export class MainPage extends LitElement {
     .ad-header-status {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       color: var(--secondary-text);
-      font-size: 0.85em;
+      font-size: 0.75em;
+    }
+
+    .ad-header-status.speech-ready {
+      color: #1e8e3e;
+    }
+
+    .speech-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .speech-dot.ready {
+      background-color: #1e8e3e;
+    }
+
+    .speech-dot.pending {
+      background-color: #f9ab00;
     }
 
     .ad-header-status .loading-spinner {
@@ -390,10 +438,23 @@ export class MainPage extends LitElement {
         this.ttsLanguage = lang as string;
       })
     );
+    this.unsubscribes.push(
+      appState.subscribe('adSegments', (segments) => {
+        this.adSegments = segments ? [...segments] : [];
+      })
+    );
+    this.unsubscribes.push(
+      appState.subscribe('videoDuration', (duration) => {
+        this.videoDuration = duration || 0;
+      })
+    );
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.scriptDebounceTimer) {
+      clearTimeout(this.scriptDebounceTimer);
+    }
     this.controller.destroy();
     for (const unsub of this.unsubscribes) {
       unsub();
@@ -558,13 +619,57 @@ export class MainPage extends LitElement {
     window.removeEventListener('mouseup', this.stopResize);
   }
 
+  private handleSplitterKeydown(e: KeyboardEvent, side: 'left' | 'right') {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const step = 2;
+    if (side === 'left') {
+      const delta = e.key === 'ArrowRight' ? step : -step;
+      this.leftColWidth = Math.max(15, Math.min(50, this.leftColWidth + delta));
+    } else {
+      const delta = e.key === 'ArrowLeft' ? step : -step;
+      this.rightColWidth = Math.max(15, Math.min(50, this.rightColWidth + delta));
+    }
+  }
+
+  private renderSpeechStatus() {
+    const nonEmpty = this.adSegments.filter((s) => s.script.trim().length > 0);
+    const total = nonEmpty.length;
+    const ready = nonEmpty.filter((s) => Boolean(s.audioData)).length;
+
+    if (this.isAdAudioGenerating) {
+      return html`
+        <div class="ad-header-status" aria-live="polite">
+          <span class="loading-spinner"></span>
+          <span>${total > 0 ? `Generating speech (${ready}/${total})...` : 'Generating speech...'}</span>
+        </div>
+      `;
+    }
+
+    if (total === 0) {
+      return '';
+    }
+
+    if (ready === total) {
+      return html`
+        <div class="ad-header-status speech-ready" title="Speech generated for all ${total} cue(s)">
+          <span class="speech-dot ready"></span>
+          <span>Speech ready (${ready})</span>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="ad-header-status" title="Speech generated for ${ready} of ${total} cue(s)">
+        <span class="speech-dot pending"></span>
+        <span>Speech ${ready}/${total}</span>
+      </div>
+    `;
+  }
+
   override render() {
     return html`
-      <top-bar
-        @toggle-debug=${() => {
-          this.showDebugPanel = !this.showDebugPanel;
-        }}
-      ></top-bar>
+      <top-bar></top-bar>
       <add-video-modal></add-video-modal>
       <div class="app-container" data-test-id="main-page-ready">
         <!-- Left Column -->
@@ -574,13 +679,25 @@ export class MainPage extends LitElement {
             id="videoPlayer"
             class="video-player-section"
             aria-label="Video Player Section">
-            <h1>Video</h1>
+            <div class="video-section-header">
+              <h2>Video</h2>
+              ${this.videoDuration > 0 && (this.currentVideoId || this.localVideoFile)
+                ? html`<span class="video-duration-badge" title="Total Video Duration">Duration: ${formatTimeForOverlay(this.videoDuration)}</span>`
+                : ''}
+            </div>
             
             ${!this.currentVideoId && !this.localVideoFile
               ? html`
-                  <div style="padding: 40px; text-align: center; border: 2px dashed #444; border-radius: 8px; margin: 16px;">
-                    <p style="margin-bottom: 16px; color: #ccc;">Use the add video button to add a video</p>
-                    <button @click=${() => this.controller.openAddVideo()} style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Add Video</button>
+                  <div
+                    role="region"
+                    aria-labelledby="onboarding-title"
+                    style="padding: 24px 20px; text-align: center; border: 2px dashed var(--border-color, #dadce0); border-radius: 8px; margin: 8px 0 12px 0; background: var(--tertiary-bg, #f8f9fa);"
+                  >
+                    <h3 id="onboarding-title" style="margin: 0 0 8px 0; font-size: 0.95rem; color: var(--primary-text, #202124);">Get Started with AD Script Assist</h3>
+                    <p style="margin: 0; font-size: 0.82rem; color: var(--secondary-text, #5f6368); line-height: 1.4;">
+                      <strong>Step 1:</strong> Use the <strong>Add Video</strong> button in the top toolbar to select a local video file or YouTube URL.<br />
+                      <strong>Step 2:</strong> Write cues manually or generate an AI Audio Description script.
+                    </p>
                   </div>
                 `
               : html`
@@ -606,6 +723,7 @@ export class MainPage extends LitElement {
 
             <video-controls
               id="videoControls"
+              @restart=${() => this.controller.jumpToStart()}
               @play-pause=${() => this.controller.togglePlayPause()}
               @rewind=${() => this.controller.jumpBackward()}
               @forward=${() => this.controller.jumpForward()}
@@ -622,8 +740,22 @@ export class MainPage extends LitElement {
 
           <!-- Project Settings Section -->
           <section class="project-settings-section">
-            <h1>Project Settings</h1>
+            <h2>Project Settings</h2>
             <div class="settings-content">
+              <div class="setting-row">
+                <label for="speakToggle" class="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    id="speakToggle" 
+                    .checked=${this.speakAdText}
+                    @change=${(e: Event) => {
+                      const checked = (e.target as HTMLInputElement).checked;
+                      appState.set('speakAdText', checked);
+                    }}
+                  />
+                  Speak AD Text
+                </label>
+              </div>
               <div class="setting-row">
                 <label for="voiceSelect">Voice</label>
                 <select
@@ -652,13 +784,16 @@ export class MainPage extends LitElement {
                       if (isConfirmed) {
                         this.ttsVoice = newVoice;
                         appState.set('ttsVoice', newVoice);
-                        void this.controller.syncScriptSegments(this.adTextArea.value);
+                        void adAudioManager.regenerateAdAudio(true);
                       } else {
                         select.value = oldVoice;
                       }
                     } else {
                       this.ttsVoice = newVoice;
                       appState.set('ttsVoice', newVoice);
+                      if (segments.length > 0) {
+                        void adAudioManager.regenerateAdAudio(true);
+                      }
                     }
                   }}
                 >
@@ -666,20 +801,6 @@ export class MainPage extends LitElement {
                     (v) => html`<option value="${v.name}">${v.label}</option>`
                   )}
                 </select>
-              </div>
-              <div class="setting-row">
-                <label for="speakToggle" class="checkbox-label">
-                  <input 
-                    type="checkbox" 
-                    id="speakToggle" 
-                    .checked=${this.speakAdText}
-                    @change=${(e: Event) => {
-                      const checked = (e.target as HTMLInputElement).checked;
-                      appState.set('speakAdText', checked);
-                    }}
-                  />
-                  Speak AD Text
-                </label>
               </div>
               <div class="setting-row-notes" style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px; width: 100%;">
                 <label for="scriptNotes" style="font-weight: 500;">Script Notes</label>
@@ -701,7 +822,18 @@ export class MainPage extends LitElement {
           <help-modal></help-modal>
         </div>
 
-        <div class="splitter" @mousedown=${(e: MouseEvent) => this.startResize(e, 'left')}></div>
+        <div
+          class="splitter"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="Resize left panel"
+          aria-valuemin="15"
+          aria-valuemax="50"
+          aria-valuenow=${Math.round(this.leftColWidth)}
+          @mousedown=${(e: MouseEvent) => this.startResize(e, 'left')}
+          @keydown=${(e: KeyboardEvent) => this.handleSplitterKeydown(e, 'left')}
+        ></div>
 
         <!-- Center Column -->
         <div id="centerColumn" class="column center-column">
@@ -711,21 +843,34 @@ export class MainPage extends LitElement {
             class="ad-script-section"
             aria-label="Audio Description Script Editor">
             <div class="ad-textarea-header">
-              <h1>Script Editor</h1>
+              <h2>Script Editor</h2>
+              ${this.renderSpeechStatus()}
             </div>
             <ad-text-area
               id="adTextArea"
+              .segments=${this.adSegments}
+              .isGenerating=${this.isAdAudioGenerating}
               @focus=${() => (this.isAdTextAreaFocused = true)}
               @blur=${() => (this.isAdTextAreaFocused = false)}
               @script-changed=${(e: CustomEvent) => {
                 appState.set('editorScriptText', e.detail.value);
-                this.controller.syncScriptSegments(e.detail.value);
+                this.controller.syncScriptSegments(e.detail.value, false);
+                if (this.scriptDebounceTimer) {
+                  clearTimeout(this.scriptDebounceTimer);
+                }
+                this.scriptDebounceTimer = setTimeout(() => {
+                  void adAudioManager.regenerateAdAudio();
+                }, 1500);
               }}
               @cursor-line-changed=${(e: CustomEvent) => {
                 appState.set('editorCursorLine', e.detail.line);
               }}
               @editor-blur=${() => {
-                void this.controller.syncScriptSegments(this.adTextArea.value);
+                if (this.scriptDebounceTimer) {
+                  clearTimeout(this.scriptDebounceTimer);
+                  this.scriptDebounceTimer = undefined;
+                }
+                void this.controller.syncScriptSegments(this.adTextArea.value, true);
               }}
               @seek-video=${(e: CustomEvent) => {
                 if (this.videoPlayerComponent) {
@@ -736,7 +881,18 @@ export class MainPage extends LitElement {
           </section>
         </div>
 
-        <div class="splitter" @mousedown=${(e: MouseEvent) => this.startResize(e, 'right')}></div>
+        <div
+          class="splitter"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="Resize right panel"
+          aria-valuemin="15"
+          aria-valuemax="50"
+          aria-valuenow=${Math.round(this.rightColWidth)}
+          @mousedown=${(e: MouseEvent) => this.startResize(e, 'right')}
+          @keydown=${(e: KeyboardEvent) => this.handleSplitterKeydown(e, 'right')}
+        ></div>
 
         <!-- Right Column -->
         <div id="rightColumn" class="column right-column" style="width: ${this.rightColWidth}%;">
@@ -745,7 +901,7 @@ export class MainPage extends LitElement {
             id="agentChatContainer"
             class="agent-chat-container"
             aria-label="AI Chat">
-            <h1>AI Chat</h1>
+            <h2>AI Chat</h2>
             <agent-chat id="agentChat"></agent-chat>
 
             <agent-input
@@ -754,20 +910,11 @@ export class MainPage extends LitElement {
               @submit-command=${this.handleAgentCommand}></agent-input>
           </section>
         </div>
-        
-        ${this.showDebugPanel ? html`
-          <div style="position: absolute; top: 0; right: 0; bottom: 0; width: 300px; z-index: 50; box-shadow: -4px 0 12px rgba(0,0,0,0.15); background: var(--secondary-bg, #ffffff);">
-            <debug-panel></debug-panel>
-          </div>
-        ` : ''}
       </div>
       
-      <div class="status-bar" role="status">
+      <div class="status-bar" role="status" aria-live="polite" aria-atomic="true">
         <div class="status-left">
           <span>${this.statusMessage}</span>
-        </div>
-        <div class="status-right">
-          <span>Local Dev</span>
         </div>
       </div>
     `;

@@ -14,7 +14,6 @@
  limitations under the License.
  */
 
-
 import {appState} from '../core/app_state';
 import {createAudioUrlFromBase64} from '../av/audio_utils';
 import {generateTTS} from './tts_client';
@@ -38,8 +37,8 @@ export class AdGenerator {
     return AdGenerator.instance;
   }
 
-  async generateAudioForSegment(script: string): Promise<string | null> {
-    const voiceName = appState.get('ttsVoice') as string || 'en-US-Journey-F';
+  async generateAudioForSegment(script: string, voiceOverride?: string): Promise<string | null> {
+    const voiceName = voiceOverride || (appState.get('ttsVoice') as string) || 'Aoede';
     const base64PcmData = await generateTTS(script, voiceName);
     if (base64PcmData) {
       const waveFile = createAudioUrlFromBase64(base64PcmData);

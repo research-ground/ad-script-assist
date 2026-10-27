@@ -15,4 +15,3 @@
  */
 
 import './components/main_page';
-import './components/debug_panel';

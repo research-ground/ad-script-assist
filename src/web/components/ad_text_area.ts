@@ -22,6 +22,7 @@
 import {css, html, LitElement, PropertyValues} from 'lit';
 import {customElement, property, query, state} from 'lit/decorators.js';
 import {live} from 'lit/directives/live.js';
+import type {AdSegment} from '../../core/types';
 
 /** Ad Text Area component. */
 @customElement('ad-text-area')
@@ -30,6 +31,8 @@ export class AdTextArea extends LitElement {
   @property({type: String}) placeholder = '';
   @property({type: Boolean}) disabled = false;
   @property({type: String, attribute: 'aria-label'}) ariaLabelText = '';
+  @property({type: Array}) segments: AdSegment[] = [];
+  @property({type: Boolean}) isGenerating = false;
 
   @query('textarea') private readonly textarea!: HTMLTextAreaElement;
   @query('.line-numbers')
@@ -77,6 +80,36 @@ export class AdTextArea extends LitElement {
 
     .line-numbers div {
       white-space: pre-wrap;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px;
+    }
+
+    .cue-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+
+    .cue-dot.ready {
+      background-color: #1e8e3e;
+    }
+
+    .cue-dot.generating {
+      background-color: #f9ab00;
+      animation: cue-pulse 1s ease-in-out infinite;
+    }
+
+    .cue-dot.failed {
+      background-color: #d93025;
+    }
+
+    @keyframes cue-pulse {
+      0%, 100% { opacity: 0.35; }
+      50% { opacity: 1; }
     }
 
     textarea {
@@ -92,8 +125,12 @@ export class AdTextArea extends LitElement {
       font-size: 1em;
       line-height: 1.5;
       color: var(--primary-text, #000000);
-      outline: none;
       min-height: 0;
+    }
+
+    textarea:focus-visible {
+      outline: 2px solid var(--accent-color, #1a73e8);
+      outline-offset: -2px;
     }
   `;
 
@@ -269,11 +306,47 @@ export class AdTextArea extends LitElement {
     return (textBefore.match(/\n/g) || []).length + 1;
   }
 
+  private getCueStatusByLine(): Map<number, 'ready' | 'generating' | 'failed'> {
+    const statusMap = new Map<number, 'ready' | 'generating' | 'failed'>();
+    if (!this.value || !this.segments || this.segments.length === 0) {
+      return statusMap;
+    }
+    const lines = this.value.split('\n');
+    let cueIdx = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('-->')) {
+        const seg = this.segments[cueIdx];
+        if (seg && seg.script.trim().length > 0) {
+          if (seg.audioData) {
+            statusMap.set(i + 1, 'ready');
+          } else if (seg.generationFailed) {
+            statusMap.set(i + 1, 'failed');
+          } else if (this.isGenerating) {
+            statusMap.set(i + 1, 'generating');
+          }
+        }
+        cueIdx++;
+      }
+    }
+    return statusMap;
+  }
+
   override render() {
+    const cueStatusByLine = this.getCueStatusByLine();
     return html`
       <div class="container">
         <div class="line-numbers" aria-hidden="true">
-          ${this.lineNumbers.map((n) => html`<div>${n || '\u00A0'}</div>`)}
+          ${this.lineNumbers.map((n) => {
+            const status = typeof n === 'number' ? cueStatusByLine.get(n) : undefined;
+            const title = status === 'ready'
+              ? 'Speech generated'
+              : status === 'generating'
+                ? 'Generating speech...'
+                : status === 'failed'
+                  ? 'Speech generation failed'
+                  : '';
+            return html`<div>${status ? html`<span class="cue-dot ${status}" title="${title}"></span>` : ''}${n || '\u00A0'}</div>`;
+          })}
         </div>
         <textarea
           .value="${live(this.value)}"

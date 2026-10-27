@@ -15,12 +15,13 @@
  */
 
 import {GenerateContentResponse, GoogleGenAI, Part} from '@google/genai';
-import {DEFAULT_AGENT_MODEL, EMBEDDED_GEMINI_API_KEY} from '../core/constants';
+import {DEFAULT_AGENT_MODEL, getInjectedGeminiApiKey} from '../core/constants';
 import {GeminiRequestPlusData} from '../core/types';
 import {appState} from '../core/app_state';
 
 
 let aiInstance: GoogleGenAI | null = null;
+let aiInstanceKey = '';
 let backendUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 if (typeof window !== 'undefined') {
   const urlParams = new URLSearchParams(window.location.search);
@@ -30,32 +31,32 @@ if (typeof window !== 'undefined') {
   }
 }
 
+export function resolveGeminiApiKey(): string {
+  const injectedKey = getInjectedGeminiApiKey();
+  if (injectedKey) {
+    return injectedKey;
+  }
+  if (typeof window !== 'undefined') {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlKey = urlParams.get('api_key') || urlParams.get('key');
+    if (urlKey) {
+      appState.set('geminiApiKey', urlKey);
+      return urlKey;
+    }
+    return appState.get('geminiApiKey') || '';
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+  }
+  return '';
+}
+
 export async function getAI(): Promise<GoogleGenAI> {
-  if (!aiInstance) {
-    let apiKey = '';
-    if (EMBEDDED_GEMINI_API_KEY) {
-      // Demo build: always use the embedded key; ?key= and Settings are ignored.
-      apiKey = EMBEDDED_GEMINI_API_KEY;
-    } else if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlKey = urlParams.get('api_key') || urlParams.get('key');
-      if (urlKey) {
-        apiKey = urlKey;
-        // Optionally save it so it persists on reload
-        appState.set('geminiApiKey', apiKey);
-      } else {
-        apiKey = appState.get('geminiApiKey');
-      }
-    } else if (typeof process !== 'undefined' && process.env) {
-      // Node.js environment
-      apiKey = process.env.GEMINI_API_KEY || '';
-    }
-    
-    if (!apiKey) {
-      apiKey = 'dummy-key-for-tests'; // Fallback for tests
-    }
+  const resolvedKey = resolveGeminiApiKey() || 'dummy-key-for-tests';
+  if (!aiInstance || aiInstanceKey !== resolvedKey) {
+    aiInstanceKey = resolvedKey;
     aiInstance = new GoogleGenAI({
-      apiKey: apiKey,
+      apiKey: resolvedKey,
     });
   }
 
