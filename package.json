@@ -6,11 +6,7 @@
   "dependencies": {
     "@google/genai": "^2.8.0",
     "dotenv": "^17.4.2",
-    "express": "^5.1.0",
-    "kokoro-js": "^1.2.1",
-    "lit": "^3.3.3",
-    "mediabunny": "1.57.0",
-    "openai": "^6.44.0"
+    "express": "^5.1.0"
   },
   "scripts": {
     "start": "node server.mjs",
@@ -31,6 +27,9 @@
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^25.9.3",
+    "kokoro-js": "^1.2.1",
+    "lit": "^3.3.3",
+    "mediabunny": "1.57.0",
     "puppeteer": "^25.1.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
