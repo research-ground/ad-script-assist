@@ -1,6 +1,12 @@
 # AD Script Assist Agent Guidelines (GEMINI.md)
 
-Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) working on the **AD Script Assist** codebase, you must strictly adhere to the guidelines outlined in this document to maintain repository hygiene, avoid breaking existing configurations, and align with project practices.
+Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, Google AI Studio, etc.) working on the **AD Script Assist** codebase, you must strictly adhere to the guidelines outlined in this document to maintain repository hygiene, avoid breaking existing configurations, and align with project practices.
+
+> [!CAUTION]
+> **DO NOT REWRITE THE TECH STACK OR INTRODUCE REACT / OTHER FRAMEWORKS**
+> * **Keep the Existing Lit + Vite Stack**: AD Script Assist is built with **Lit Web Components (`lit`, `LitElement`, TypeScript custom elements under `src/web/`)**, **Vite (`vite.config.ts`)**, and a **Node/Express server shim (`src/server.ts`)**.
+> * **Strict Prohibition on Framework Migration**: Even if your host environment (such as Google AI Studio) defaults to React, **NEVER** rewrite or convert any part of this application to React (`react`, `react-dom`, `.tsx`/`.jsx`), Angular, Vue, Svelte, Next.js, or any other UI framework, and **NEVER** replace `vite.config.ts`, `package.json` scripts, `index.html`, `src/web/`, or `src/server.ts`.
+> * All UI, state, and service modifications must be implemented strictly within the existing Lit Web Components architecture under `src/` and `src/server.ts`.
 
 ---
 
