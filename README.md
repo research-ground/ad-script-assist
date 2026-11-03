@@ -34,9 +34,9 @@ Originally, AD Script Assist ran 100% in the browser. It now uses a **client-hea
   2. **API Key Security**: Keeping API keys (`gemini_api_key`, `openai_api_key`) strictly on the server in `models.conf` (or server environment variables) ensures secrets are never embedded in client JavaScript bundles or exposed in browser DevTools network logs.
 - **How It Works**:
   - **In the Browser (`src/web/`, `src/av/`, `src/core/`)**: Video playback, WebVTT script parsing/editing, IndexedDB project persistence, on-device Kokoro-82M WebGPU/WASM neural speech synthesis, and WebCodecs MP4 audio/video mixing all run in the browser.
-  - **On the Server ([`src/server.ts`](src/server.ts), mounted by [`vite.config.ts`](vite.config.ts))**: Reads [`models.conf`](models.conf.example) and exposes two lightweight routes:
+  - **On the Server ([`src/server.ts`](src/server.ts), mounted by [`vite.config.ts`](vite.config.ts))**: Reads [`models.conf`](models.conf) and exposes two lightweight routes:
     1. `GET /api/config`: Serves the active `[providers]` and `[models]` configuration to the browser with all non-empty `[keys]` replaced by opaque placeholders (`__SERVER_KEY:<key_name>__`).
-    2. `POST /api/proxy`: Accepts outbound AI/TTS requests (up to 2 GB to support 1 GB+ local video blobs), validates the target hostname (`generativelanguage.googleapis.com` or `api.openai.com`), substitutes the real API key in server memory, and executes Gemini `generateContent` calls via the official `@google/genai` SDK (`User-Agent: aistudio-build`).
+    2. `POST /api/proxy`: Accepts outbound AI/TTS requests (up to 2 GB to support 1 GB+ local video blobs), validates the target hostname (`generativelanguage.googleapis.com` or `api.openai.com`), substitutes the real API key in server memory, and executes Gemini `generateContent` calls via the official `@google/genai` SDK (`User-Agent: aistudio-build`), preserving upstream HTTP error codes and explanations (`503`, `429`, etc.).
 
 ---
 
@@ -60,6 +60,8 @@ AD Script Assist runs directly inside Google AI Studio's App Builder:
 3. **API Keys in AI Studio**:
    - In Google AI Studio, `src/server.ts` automatically detects the host environment's injected `GEMINI_API_KEY` (or `API_KEY`) on the server—no configuration file changes are required.
 
+> **Default Model & Voice Quota Note**: Due to tightened Google API rate limits and free-tier quotas, AD Script Assist defaults to **`gemini-3.5-flash-lite`** (`gemini_model = gemini-3.5-flash-lite` in `models.conf`) for video analysis/Q&A and **local on-device Kokoro neural TTS** (`tts_provider = kokoro`, voice `af_heart` / `Heart (Kokoro Local)`) for speech synthesis. You can switch to another Gemini model (e.g., `gemini-3.8-flash`) or cloud TTS in `models.conf` / **Settings** if your account has higher quota.
+
 ---
 
 ### Option 2: Run Locally
@@ -70,23 +72,25 @@ AD Script Assist runs directly inside Google AI Studio's App Builder:
 
 #### Installation, Configuration (`models.conf`) & Development Server
 ```bash
-# 1. Install dependencies and create models.conf from models.conf.example
+# 1. Install dependencies
 make setup
 ```
 
-Open `models.conf` in any text editor to configure your AI providers, model versions, and API keys:
+Open [`models.conf`](models.conf) in any text editor to configure your AI providers, model versions, and API keys:
 
 ```ini
 [providers]
 # Active AI Vision / Q&A provider: gemini | openai
 ai_provider = gemini
 
-# Cloud Text-to-Speech provider when a cloud voice is selected in the UI:
-#   gemini | openai
+# Default Text-to-Speech engine: kokoro (local neural TTS) | gemini | openai
+tts_provider = kokoro
+
+# Cloud Text-to-Speech provider when switching to Cloud TTS in the UI: gemini | openai
 cloud_tts_provider = gemini
 
 [models]
-gemini_model = gemini-3.8-flash
+gemini_model = gemini-3.5-flash-lite
 openai_model = gpt-4o
 gemini_tts_model = gemini-3.1-flash-tts-preview
 openai_tts_model = tts-1
@@ -96,7 +100,7 @@ gemini_api_key = YOUR_GEMINI_API_KEY
 openai_api_key =
 ```
 
-> **Note**: `models.conf` is git-ignored so your personal API keys are never committed (always edit `models.conf` rather than `models.conf.example`). User interface preferences—switching between **Cloud TTS** and **Kokoro (Local Browser TTS)**, selecting **Voice Language**, and customizing **Hotkeys**—remain configurable inside the in-app **Settings** dialog. Even without an API key, you can load a video, write or edit WebVTT cues in the **Script Editor**, and synthesize speech locally using Kokoro (`Heart (Kokoro Local)` or any other local voice).
+> **Note on `models.conf` & Local API Keys**: A keyless `models.conf` is checked directly into git (rather than `models.conf.example`) so cloud IDEs like Google AI Studio can import the repository cleanly without renaming files. Before adding personal API keys locally, run `git update-index --skip-worktree models.conf` so git ignores your local changes to `models.conf`. User interface preferences—switching between **Kokoro (Local Browser TTS)** and **Cloud TTS**, selecting **Voice Language**, and customizing **Hotkeys**—remain configurable inside the in-app **Settings** dialog. Even without an API key, you can load a video, write or edit WebVTT cues in the **Script Editor**, and synthesize speech locally using Kokoro (`Heart (Kokoro Local)` or any other local voice).
 
 #### Changing AI & Cloud TTS Providers (`models.conf`)
 Because API keys and model selections are isolated on the server, switching between **Google Gemini** and **OpenAI** (or changing model IDs) is done in `models.conf`:
@@ -104,7 +108,7 @@ Because API keys and model selections are isolated on the server, switching betw
 1. **Switch the Vision / Q&A Provider (`ai_provider`)**:
    - Set `ai_provider = gemini` (analyzes both YouTube URLs and local video files) or `ai_provider = openai` (analyzes local video files via extracted frames).
    - Provide the matching API key under `[keys]` (`gemini_api_key = ...` or `openai_api_key = ...`).
-   - *(Optional)* Customize `gemini_model` (default `gemini-3.8-flash`) or `openai_model` (default `gpt-4o`) under `[models]`.
+   - *(Optional)* Customize `gemini_model` (default `gemini-3.5-flash-lite`) or `openai_model` (default `gpt-4o`) under `[models]`.
 2. **Switch the Cloud Text-to-Speech Provider (`cloud_tts_provider`)**:
    - Set `cloud_tts_provider = gemini` (uses `gemini_tts_model`, default `gemini-3.1-flash-tts-preview`) or `cloud_tts_provider = openai` (uses `openai_tts_model`, default `tts-1`).
    - You can mix and match providers (for example, `ai_provider = gemini` with `cloud_tts_provider = openai`, provided both keys are set under `[keys]`).
@@ -131,7 +135,7 @@ make serve
 
 ```
 ├── metadata.json           # Google AI Studio app metadata (MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API)
-├── models.conf.example     # Template for server-side [providers], [models], and [keys]
+├── models.conf             # Unified server-side [providers], [models], and [keys] configuration
 ├── public/                 # Static assets
 ├── src/
 │   ├── server.ts           # Node/Vite server middleware (/api/config & /api/proxy)

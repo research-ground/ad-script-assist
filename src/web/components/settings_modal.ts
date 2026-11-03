@@ -150,7 +150,7 @@ export class SettingsModal extends LitElement {
       this.currentHotkeys = await retrieveHotkeyConfigsFromDB();
       this.originalHotkeys = structuredClone(this.currentHotkeys);
 
-      this.currentTtsProvider = appState.get('ttsProvider') || 'gemini';
+      this.currentTtsProvider = appState.get('ttsProvider') || 'kokoro';
       this.originalTtsProvider = this.currentTtsProvider;
       this.currentLanguage = appState.get('ttsLanguage') || 'en-US';
       this.originalLanguage = this.currentLanguage;

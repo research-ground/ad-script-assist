@@ -15,6 +15,7 @@
  */
 
 import {appState} from '../core/app_state';
+import {DEFAULT_KOKORO_VOICE} from '../core/constants';
 import {createAudioUrlFromBase64} from '../av/audio_utils';
 import {generateTTS} from './tts_client';
 
@@ -38,7 +39,7 @@ export class AdGenerator {
   }
 
   async generateAudioForSegment(script: string, voiceOverride?: string): Promise<string | null> {
-    const voiceName = voiceOverride || (appState.get('ttsVoice') as string) || 'Aoede';
+    const voiceName = voiceOverride || (appState.get('ttsVoice') as string) || DEFAULT_KOKORO_VOICE;
     const base64PcmData = await generateTTS(script, voiceName);
     if (base64PcmData) {
       const waveFile = createAudioUrlFromBase64(base64PcmData);

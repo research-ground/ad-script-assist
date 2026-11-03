@@ -102,23 +102,18 @@ export interface ServerConfigSnapshot {
 }
 
 /**
- * Reads `models.conf.example` and `models.conf` from `rootDir`, overlaying any
- * host-injected environment variables (`GEMINI_API_KEY`, `API_KEY`,
- * `OPENAI_API_KEY`).
+ * Reads `models.conf` from `rootDir`, overlaying any host-injected environment
+ * variables (`GEMINI_API_KEY`, `API_KEY`, `OPENAI_API_KEY`).
  */
 export function loadServerConfig(rootDir = process.cwd()): ServerConfigSnapshot {
-  const filesInOrder = ['models.conf.example', 'models.conf'];
-
   let merged: IniSections = {};
-  for (const fileName of filesInOrder) {
-    const fullPath = path.join(rootDir, fileName);
-    if (fs.existsSync(fullPath)) {
-      try {
-        const content = fs.readFileSync(fullPath, 'utf-8');
-        merged = mergeSections(merged, parseIniText(content));
-      } catch (e) {
-        console.warn(`Warning: Failed to read ${fileName}:`, e);
-      }
+  const fullPath = path.join(rootDir, 'models.conf');
+  if (fs.existsSync(fullPath)) {
+    try {
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      merged = mergeSections(merged, parseIniText(content));
+    } catch (e) {
+      console.warn('Warning: Failed to read models.conf:', e);
     }
   }
 
@@ -370,13 +365,30 @@ export function createApiMiddleware(rootDir = process.cwd()) {
           sendJson(res, 200, sdkResponse);
           return;
         } catch (err: unknown) {
-          const message =
+          const rawStatus = (err as { status?: number })?.status;
+          const rawMsg =
             err instanceof Error ? err.message : 'Gemini SDK request failed';
+          try {
+            const parsed = JSON.parse(rawMsg) as {
+              error?: { code?: number; status?: string; message?: string };
+            };
+            if (parsed && typeof parsed === 'object' && parsed.error) {
+              const code =
+                typeof rawStatus === 'number' && rawStatus >= 400
+                  ? rawStatus
+                  : typeof parsed.error.code === 'number' &&
+                      parsed.error.code >= 400
+                    ? parsed.error.code
+                    : 502;
+              sendJson(res, code, { error: parsed.error });
+              return;
+            }
+          } catch {
+            // Not a JSON error body from @google/genai SDK
+          }
           const status =
-            typeof (err as { status?: number })?.status === 'number'
-              ? (err as { status: number }).status
-              : 500;
-          sendJson(res, status, { error: { message, code: status } });
+            typeof rawStatus === 'number' && rawStatus >= 400 ? rawStatus : 502;
+          sendJson(res, status, { error: { message: rawMsg, code: status } });
           return;
         }
       }
@@ -393,6 +405,22 @@ export function createApiMiddleware(rootDir = process.cwd()) {
               : undefined,
         });
 
+        if (!upstreamRes.ok) {
+          const contentType = (
+            upstreamRes.headers.get('content-type') || ''
+          ).toLowerCase();
+          if (contentType.includes('text/html')) {
+            sendJson(res, upstreamRes.status, {
+              error: {
+                code: upstreamRes.status,
+                status: upstreamRes.statusText || 'UPSTREAM_ERROR',
+                message: `Upstream service ${parsedTarget.hostname} returned HTTP ${upstreamRes.status}${upstreamRes.statusText ? ` (${upstreamRes.statusText})` : ''}.`,
+              },
+            });
+            return;
+          }
+        }
+
         res.statusCode = upstreamRes.status;
         const contentType = upstreamRes.headers.get('content-type');
         if (contentType) {
@@ -404,7 +432,7 @@ export function createApiMiddleware(rootDir = process.cwd()) {
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : 'Upstream proxy request failed';
-        sendJson(res, 502, { error: message });
+        sendJson(res, 502, { error: { code: 502, message } });
         return;
       }
     }

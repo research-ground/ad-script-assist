@@ -23,7 +23,7 @@ import {
   formatTimeForScreenReader,
 } from '../../core/time_utils';
 import type {AdSegment, AgentContext, AgentResponse} from '../../core/types';
-import {getVoicesForTtsProvider} from '../../core/constants';
+import {DEFAULT_KOKORO_VOICE, getVoicesForTtsProvider} from '../../core/constants';
 import {adAudioManager} from '../../av/ad_audio_manager';
 import {AppController} from '../controller/app_controller';
 
@@ -67,8 +67,8 @@ export class MainPage extends LitElement {
   @state() isAdTextAreaFocused = false;
   @state() isAdAudioGenerating = false;
   @state() ttsLanguage = 'en-US';
-  @state() ttsVoice = 'Aoede';
-  @state() ttsProvider: 'gemini' | 'openai' | 'kokoro' = 'gemini';
+  @state() ttsVoice = DEFAULT_KOKORO_VOICE;
+  @state() ttsProvider: 'gemini' | 'openai' | 'kokoro' = 'kokoro';
   @state() speakAdText = true;
   @state() private scriptNotes = '';
 
@@ -430,7 +430,7 @@ export class MainPage extends LitElement {
     );
     this.unsubscribes.push(
       appState.subscribe('ttsProvider', (provider) => {
-        this.ttsProvider = (provider as 'gemini' | 'openai' | 'kokoro') || 'gemini';
+        this.ttsProvider = (provider as 'gemini' | 'openai' | 'kokoro') || 'kokoro';
       })
     );
     this.unsubscribes.push(

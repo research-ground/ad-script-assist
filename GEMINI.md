@@ -18,12 +18,13 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 * If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
-* **External Service Keys**: Active AI/TTS provider selections (`gemini`, `openai`), model IDs (`gemini_model`, `openai_model`, `gemini_tts_model`, `openai_tts_model`), and API keys are configured in `models.conf` (git-ignored, templated from `models.conf.example`).
+* **Single Unified Config (`models.conf`)**: Active AI/TTS provider selections (`gemini`, `openai`, `kokoro`), model IDs (`gemini_model`, `openai_model`, `gemini_tts_model`, `openai_tts_model`), and API keys are configured in a single checked-in keyless `models.conf` file (no `.conf.example` files). Local key edits are kept out of commits with `git update-index --skip-worktree models.conf`.
 * **Server-Side Key Isolation**: `models.conf` is read on the server by `src/server.ts`. Real API keys must never be exposed to the browser; `GET /api/config` replaces non-empty keys with `__SERVER_KEY:<name>__` placeholders, and `POST /api/proxy` substitutes real keys on the server.
+* **Transparent Error Reporting**: Never obscure upstream API HTTP status codes or explanations (`503`, `429`, etc.), and never forward raw HTML error pages from `src/server.ts`.
 * Avoid hardcoding any credentials or API keys in source files.
 
-### 🤖 Gemini AI Model Selection
-* **Strict Model Selection**: Never proactively change the Gemini model configuration (`gemini-3.8-flash` for vision/chat, `gemini-3.1-flash-tts-preview` for speech) in `.env`, `models.conf`, `src/core/constants.ts`, or code unless the user explicitly tells you which specific model to use and where to change it.
+### 🤖 Gemini AI Model & Speech Defaults
+* **Strict Model Selection**: Due to tightened API quotas, the default Gemini model is `gemini-3.5-flash-lite` (with local Kokoro `af_heart` as the default TTS voice, and `gemini-3.1-flash-tts-preview` when Cloud TTS is selected). Never proactively change the Gemini model configuration in `models.conf`, `src/core/constants.ts`, or code unless the user explicitly tells you which specific model to use and where to change it.
 
 ---
 
@@ -72,8 +73,8 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root and create `models.conf` (from `models.conf.example`).
-* **Configuration**: External AI/TTS providers, model versions, and API keys are configured on the server in `models.conf`.
+* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root.
+* **Configuration**: External AI/TTS providers, model versions, and API keys are configured on the server in `models.conf` (checked into git without keys; use `git update-index --skip-worktree models.conf` locally when adding personal keys).
 
 ### 🧪 Running Tests
 Always run the local test suite when making changes to verify correctness:

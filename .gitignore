@@ -1,8 +1,6 @@
 node_modules/
 .env
-models.conf
 models.*.conf
-!models.conf.example
 .DS_Store
 dist/
 *.zip

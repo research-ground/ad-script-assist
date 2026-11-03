@@ -26,6 +26,7 @@ export enum ModelName {
   GEMINI_3_PRO = 'gemini-3-pro-preview',
   GEMINI_3_1_PRO = 'gemini-3.1-pro-preview',
   GEMINI_3_1_FLASH_LITE = 'gemini-3.1-flash-lite-preview',
+  GEMINI_3_5_FLASH_LITE = 'gemini-3.5-flash-lite',
   GEMINI_3_5_FLASH = 'gemini-3.5-flash',
   GEMINI_3_8_FLASH = 'gemini-3.8-flash',
   GEMINI_3_1_FLASH_TTS = 'gemini-3.1-flash-tts-preview',
@@ -34,7 +35,7 @@ export enum ModelName {
 /** The default Gemini model to use for Text-to-Speech. Using undefined for standard Cloud TTS. */
 export const DEFAULT_TTS_MODEL = undefined;
 /** The default Gemini model to use for the agent chat. */
-export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_8_FLASH;
+export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_5_FLASH_LITE;
 /** The default Gemini model for AD speech (used when the provider is Gemini). */
 export const DEFAULT_SPEECH_MODEL = ModelName.GEMINI_3_1_FLASH_TTS;
 /** The default OpenAI model to use for the agent chat. */

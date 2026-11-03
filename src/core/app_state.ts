@@ -22,6 +22,7 @@
 import {AdSegment, VideoPlayerApi, ConversationEntry} from './types';
 import {
   DEFAULT_AGENT_MODEL,
+  DEFAULT_KOKORO_VOICE,
   DEFAULT_OPENAI_MODEL,
   DEFAULT_OPENAI_TTS_MODEL,
   DEFAULT_SPEECH_MODEL,
@@ -161,7 +162,7 @@ class AppStateManager {
     openaiApiKey: '',
     llmProvider: 'gemini',
     cloudTtsProvider: 'gemini',
-    ttsProvider: 'gemini',
+    ttsProvider: 'kokoro',
     ttsApiKey: '',
     ttsLanguage: 'en-US',
     agentModel: DEFAULT_AGENT_MODEL,
@@ -169,7 +170,7 @@ class AppStateManager {
     speechModel: DEFAULT_SPEECH_MODEL,
     openaiTtsModel: DEFAULT_OPENAI_TTS_MODEL,
 
-    ttsVoice: 'Aoede',
+    ttsVoice: DEFAULT_KOKORO_VOICE,
     speakAdText: true,
     videoType: 'youtube',
     videoSource: '',
@@ -194,8 +195,12 @@ class AppStateManager {
       const savedTtsProvider = localStorage.getItem(
         'userSettings_ttsProvider',
       ) as 'gemini' | 'openai' | 'kokoro' | null;
-      if (savedTtsProvider === 'kokoro') {
-        this.state.ttsProvider = 'kokoro';
+      if (
+        savedTtsProvider === 'kokoro' ||
+        savedTtsProvider === 'gemini' ||
+        savedTtsProvider === 'openai'
+      ) {
+        this.state.ttsProvider = savedTtsProvider;
       }
       this.state.ttsLanguage =
         localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
@@ -297,13 +302,26 @@ class AppStateManager {
       cloudTtsProvider === 'openai' ? openaiKey : geminiKey;
     this.set('ttsApiKey', activeCloudTtsKey);
 
-    // If user hasn't explicitly chosen local Kokoro TTS, align ttsProvider with cloudTtsProvider
-    if (this.state.ttsProvider !== 'kokoro') {
+    const hasUserSavedTtsProvider =
+      typeof localStorage !== 'undefined' &&
+      typeof localStorage.getItem === 'function' &&
+      Boolean(localStorage.getItem('userSettings_ttsProvider'));
+
+    if (!hasUserSavedTtsProvider) {
+      const confTtsProv = (providers['tts_provider'] || 'kokoro').toLowerCase();
+      const targetTtsProvider: 'gemini' | 'openai' | 'kokoro' =
+        confTtsProv === 'gemini' || confTtsProv === 'openai'
+          ? confTtsProv
+          : 'kokoro';
+      this.state.ttsProvider = targetTtsProvider;
+      this.notify('ttsProvider', targetTtsProvider);
+    } else if (this.state.ttsProvider !== 'kokoro') {
       this.set('ttsProvider', cloudTtsProvider);
-      const validVoices = getVoicesForTtsProvider(cloudTtsProvider);
-      if (!validVoices.some((v) => v.name === this.state.ttsVoice)) {
-        this.set('ttsVoice', getDefaultVoiceForTtsProvider(cloudTtsProvider));
-      }
+    }
+
+    const validVoices = getVoicesForTtsProvider(this.state.ttsProvider);
+    if (!validVoices.some((v) => v.name === this.state.ttsVoice)) {
+      this.set('ttsVoice', getDefaultVoiceForTtsProvider(this.state.ttsProvider));
     }
   }
 

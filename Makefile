@@ -17,13 +17,10 @@
 # Default target
 all: build
 
-# Install dependencies and create models.conf from models.conf.example if missing
+# Install dependencies
 setup:
 	npm install
-	@if [ ! -f models.conf ]; then \
-		cp models.conf.example models.conf; \
-		echo "Created models.conf from models.conf.example"; \
-	fi
+	@echo "Setup complete. Edit models.conf to configure API keys and providers, then run 'make dev'."
 
 # 1. Build with Vite
 build:

@@ -52,15 +52,46 @@ export function describeError(
 ): string {
   const raw = error instanceof Error ? error.message : String(error);
   let extracted = raw;
-  try {
-    const body = JSON.parse(raw.slice(raw.indexOf('{')));
-    const e = body.error ?? body;
-    if (e.message) {
-      const code = [e.code, e.status && `(${e.status})`].filter(Boolean).join(' ');
-      extracted = code ? `${code}: ${e.message}` : e.message;
+  const braceIdx = raw.indexOf('{');
+  if (braceIdx !== -1) {
+    const prefix = raw.slice(0, braceIdx).trim().replace(/:\s*$/, '');
+    try {
+      const body = JSON.parse(raw.slice(braceIdx));
+      let e = body.error ?? body;
+      if (typeof e === 'string') {
+        try {
+          const inner = JSON.parse(e);
+          e = inner.error ?? inner;
+        } catch {
+          extracted = prefix ? `${prefix}: ${e}` : e;
+        }
+      } else if (e && typeof e === 'object' && typeof e.message === 'string') {
+        try {
+          const inner = JSON.parse(e.message);
+          if (inner?.error) {
+            e = inner.error;
+          }
+        } catch {
+          // e.message is plain text
+        }
+      }
+      if (e && typeof e === 'object' && e.message) {
+        const codeLabel = [
+          e.code ? `HTTP ${e.code}` : '',
+          e.status ? `(${e.status})` : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        extracted = codeLabel ? `${codeLabel}: ${e.message}` : e.message;
+      }
+    } catch {
+      // Not JSON; fall through
     }
-  } catch {
-    // Not JSON; fall through to the raw message.
+  } else if (raw.includes('<!DOCTYPE') || raw.includes('<html')) {
+    const statusMatch = raw.match(/\b([45]\d{2})\b/);
+    extracted = statusMatch
+      ? `HTTP ${statusMatch[1]}: Upstream service returned an HTML error page.`
+      : 'Upstream service returned an HTML error page.';
   }
 
   const lower = extracted.toLowerCase();
@@ -73,10 +104,10 @@ export function describeError(
     lower.includes('unauthorized')
   ) {
     if (provider === 'gemini' && !extracted.includes('OpenAI key')) {
-      return `${extracted} Make sure you entered a valid Google Gemini API key (not an OpenAI key) in Settings.`;
+      return `${extracted} Make sure you configured a valid Google Gemini API key (not an OpenAI key) in models.conf.`;
     }
     if (provider === 'openai' && !extracted.includes('Gemini key')) {
-      return `${extracted} Make sure you entered a valid OpenAI API key (not a Google Gemini key) in Settings.`;
+      return `${extracted} Make sure you configured a valid OpenAI API key (not a Google Gemini key) in models.conf.`;
     }
   }
 

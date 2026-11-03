@@ -66,14 +66,14 @@ async function synthesizeWithKokoro(
  */
 export async function generateTTS(
   text: string,
-  voiceName: string = 'Aoede',
+  voiceName: string = DEFAULT_KOKORO_VOICE,
   speed: number = 1.0,
   provider?: string,
 ): Promise<string> {
   const ttsProvider =
     (provider as 'gemini' | 'openai' | 'kokoro' | undefined) ||
-    (typeof window !== 'undefined' ? appState.get('ttsProvider') : 'gemini') ||
-    'gemini';
+    (typeof window !== 'undefined' ? appState.get('ttsProvider') : 'kokoro') ||
+    'kokoro';
 
   if (ttsProvider === 'kokoro' || isKokoroVoice(voiceName)) {
     return synthesizeWithKokoro(text, voiceName, speed);
