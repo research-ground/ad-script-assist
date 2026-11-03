@@ -17,6 +17,7 @@
 import { GoogleGenAI } from '@google/genai';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 export const SERVER_KEY_PREFIX = '__SERVER_KEY:';
@@ -24,6 +25,96 @@ export const SERVER_KEY_ENV_PREFIX = '__SERVER_KEY_ENV:';
 export const SERVER_KEY_SUFFIX = '__';
 
 const MAX_PROXY_BODY_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB to support 1 GB+ local video blobs
+const MAX_INLINE_VIDEO_BYTES = 14 * 1024 * 1024; // 14 MB raw (~18.7 MB base64, safely under Gemini's 20 MB inline limit)
+const UPLOAD_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_CACHED_UPLOADS = 5;
+
+interface UploadedVideoEntry {
+  chunks: Buffer[];
+  receivedCount: number;
+  totalChunks: number;
+  buffer?: Buffer;
+  mimeType: string;
+  createdAt: number;
+  geminiFileUri?: string;
+  geminiFileMimeType?: string;
+}
+
+const uploadedVideos = new Map<string, UploadedVideoEntry>();
+
+function pruneUploadedVideos(): void {
+  const now = Date.now();
+  for (const [id, entry] of uploadedVideos.entries()) {
+    if (now - entry.createdAt > UPLOAD_TTL_MS) {
+      uploadedVideos.delete(id);
+    }
+  }
+  while (uploadedVideos.size > MAX_CACHED_UPLOADS) {
+    const oldestKey = uploadedVideos.keys().next().value;
+    if (oldestKey) {
+      uploadedVideos.delete(oldestKey);
+    } else {
+      break;
+    }
+  }
+}
+
+async function resolveGeminiFileUri(
+  ai: GoogleGenAI,
+  entry: UploadedVideoEntry,
+  uploadId: string,
+): Promise<{ fileUri: string; mimeType: string }> {
+  if (entry.geminiFileUri && entry.geminiFileMimeType) {
+    return {
+      fileUri: entry.geminiFileUri,
+      mimeType: entry.geminiFileMimeType,
+    };
+  }
+  if (!entry.buffer) {
+    throw new Error('Uploaded video buffer is incomplete.');
+  }
+  const mimeType = entry.mimeType || 'video/mp4';
+  const ext = mimeType.includes('webm')
+    ? '.webm'
+    : mimeType.includes('quicktime')
+      ? '.mov'
+      : '.mp4';
+  const tmpFile = path.join(
+    os.tmpdir(),
+    `ad_script_assist_${uploadId.replace(/[^a-zA-Z0-9_-]/g, '')}${ext}`,
+  );
+  fs.writeFileSync(tmpFile, entry.buffer);
+  try {
+    let uploaded = await ai.files.upload({
+      file: tmpFile,
+      config: { mimeType },
+    });
+    const deadline = Date.now() + 180_000;
+    while (uploaded.state === 'PROCESSING' && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (!uploaded.name) break;
+      uploaded = await ai.files.get({ name: uploaded.name });
+    }
+    if (uploaded.state === 'FAILED') {
+      throw new Error('Gemini Files API failed to process the uploaded video.');
+    }
+    if (!uploaded.uri) {
+      throw new Error('Gemini Files API did not return a file URI.');
+    }
+    entry.geminiFileUri = uploaded.uri;
+    entry.geminiFileMimeType = uploaded.mimeType || mimeType;
+    return {
+      fileUri: entry.geminiFileUri,
+      mimeType: entry.geminiFileMimeType,
+    };
+  } finally {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      // Ignore temp file cleanup errors
+    }
+  }
+}
 
 type IniSections = Record<string, Record<string, string>>;
 
@@ -246,6 +337,86 @@ export function createApiMiddleware(rootDir = process.cwd()) {
       return;
     }
 
+    if (req.method === 'POST' && pathname === '/api/upload-chunk') {
+      pruneUploadedVideos();
+      let rawBody: Buffer;
+      try {
+        rawBody = await readRequestBodyBuffer(req, 16 * 1024 * 1024);
+      } catch (e) {
+        sendJson(res, 413, {
+          error: {
+            code: 413,
+            message: e instanceof Error ? e.message : 'Chunk too large.',
+          },
+        });
+        return;
+      }
+
+      let chunkPayload: {
+        uploadId?: string;
+        chunkIndex?: number;
+        totalChunks?: number;
+        mimeType?: string;
+        data?: string;
+      };
+      try {
+        chunkPayload = JSON.parse(rawBody.toString('utf-8'));
+      } catch {
+        sendJson(res, 400, {
+          error: { code: 400, message: 'Invalid JSON in /api/upload-chunk.' },
+        });
+        return;
+      }
+
+      const { uploadId, chunkIndex, totalChunks, mimeType, data } = chunkPayload;
+      if (
+        !uploadId ||
+        typeof chunkIndex !== 'number' ||
+        typeof totalChunks !== 'number' ||
+        totalChunks < 1 ||
+        chunkIndex < 0 ||
+        chunkIndex >= totalChunks ||
+        typeof data !== 'string'
+      ) {
+        sendJson(res, 400, {
+          error: { code: 400, message: 'Invalid chunk parameters.' },
+        });
+        return;
+      }
+
+      let entry = uploadedVideos.get(uploadId);
+      if (!entry || entry.totalChunks !== totalChunks) {
+        entry = {
+          chunks: new Array<Buffer>(totalChunks),
+          receivedCount: 0,
+          totalChunks,
+          mimeType: mimeType || 'video/mp4',
+          createdAt: Date.now(),
+        };
+        uploadedVideos.set(uploadId, entry);
+      }
+      entry.createdAt = Date.now();
+      if (mimeType) {
+        entry.mimeType = mimeType;
+      }
+      if (!entry.chunks[chunkIndex]) {
+        entry.receivedCount += 1;
+      }
+      entry.chunks[chunkIndex] = Buffer.from(data, 'base64');
+
+      if (entry.receivedCount === totalChunks) {
+        entry.buffer = Buffer.concat(entry.chunks);
+        entry.chunks = [];
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        uploadId,
+        ready: Boolean(entry.buffer),
+      });
+      return;
+    }
+
     if (req.method === 'POST' && pathname === '/api/proxy') {
       const { realKeys, allowedHosts } = loadServerConfig(rootDir);
 
@@ -347,6 +518,66 @@ export function createApiMiddleware(rootDir = process.cwd()) {
             apiKey,
             httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
           });
+
+          if (Array.isArray(parsedJson.contents)) {
+            for (const contentItem of parsedJson.contents as Array<{
+              parts?: Array<Record<string, unknown>>;
+            }>) {
+              if (!Array.isArray(contentItem?.parts)) continue;
+              for (let pIdx = 0; pIdx < contentItem.parts.length; pIdx++) {
+                const part = contentItem.parts[pIdx];
+                const fileData = part?.['fileData'] as
+                  | { fileUri?: string; mimeType?: string }
+                  | undefined;
+                if (
+                  fileData?.fileUri &&
+                  fileData.fileUri.startsWith('local-upload://')
+                ) {
+                  const uploadId = fileData.fileUri.slice(
+                    'local-upload://'.length,
+                  );
+                  const entry = uploadedVideos.get(uploadId);
+                  if (!entry || !entry.buffer) {
+                    sendJson(res, 410, {
+                      error: {
+                        code: 410,
+                        status: 'UPLOAD_EXPIRED',
+                        message:
+                          'Local video upload session expired on server. Please retry.',
+                      },
+                    });
+                    return;
+                  }
+                  entry.createdAt = Date.now();
+                  const resolvedMime =
+                    fileData.mimeType || entry.mimeType || 'video/mp4';
+                  if (
+                    entry.buffer.length <= MAX_INLINE_VIDEO_BYTES &&
+                    !entry.geminiFileUri
+                  ) {
+                    contentItem.parts[pIdx] = {
+                      inlineData: {
+                        data: entry.buffer.toString('base64'),
+                        mimeType: resolvedMime,
+                      },
+                    };
+                  } else {
+                    const uploadedFile = await resolveGeminiFileUri(
+                      ai,
+                      entry,
+                      uploadId,
+                    );
+                    contentItem.parts[pIdx] = {
+                      fileData: {
+                        fileUri: uploadedFile.fileUri,
+                        mimeType: uploadedFile.mimeType,
+                      },
+                    };
+                  }
+                }
+              }
+            }
+          }
 
           const config: Record<string, unknown> = {
             ...(parsedJson.generationConfig || {}),

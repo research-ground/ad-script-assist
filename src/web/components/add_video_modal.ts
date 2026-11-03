@@ -263,15 +263,26 @@ export class AddVideoModal extends LitElement {
 
   private handleFileInput(e: Event) {
     const input = e.target as HTMLInputElement;
-    if (input.files && input.files.length > 0) {
-      this.processFile(input.files[0]);
+    const file = input.files && input.files.length > 0 ? input.files[0] : null;
+    input.value = '';
+    if (file) {
+      void this.processFile(file);
     }
+  }
+
+  private isSupportedVideoFile(file: File): boolean {
+    if (file.type && file.type.startsWith('video/')) {
+      return true;
+    }
+    return /\.(mp4|mov|m4v|webm|mkv|avi|ogv|ogg|3gp|m2ts|ts|flv|wmv)$/i.test(
+      file.name,
+    );
   }
 
   private async processFile(file: File) {
     this.error = '';
-    
-    if (!file.type.startsWith('video/')) {
+
+    if (!this.isSupportedVideoFile(file)) {
       this.error = 'Please upload a valid video file.';
       return;
     }
@@ -283,17 +294,21 @@ export class AddVideoModal extends LitElement {
     this.isLoading = true;
     try {
       const duration = await this.getVideoDuration(file);
-      if (duration > 600) {
+      if (Number.isFinite(duration) && duration > 600) {
         this.error = 'Video must be under 10 minutes.';
         return;
       }
-      
+
       // Valid!
       const videoId = 'local_' + file.name;
-      appState.set('localVideoFile', file);
-      appState.set('currentVideoId', videoId);
       appState.set('videoType', 'local');
       appState.set('videoSource', file.name);
+      appState.set(
+        'videoDuration',
+        Number.isFinite(duration) && duration > 0 ? duration : 0,
+      );
+      appState.set('localVideoFile', file);
+      appState.set('currentVideoId', videoId);
       this.close();
     } catch (err) {
       this.error = 'Could not read video file.';
@@ -306,12 +321,14 @@ export class AddVideoModal extends LitElement {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
-      
+      const objectUrl = URL.createObjectURL(file);
+
       const cleanup = () => {
-        const src = video.src;
+        video.onloadedmetadata = null;
+        video.onerror = null;
         video.removeAttribute('src');
         video.load();
-        URL.revokeObjectURL(src);
+        URL.revokeObjectURL(objectUrl);
       };
 
       video.onloadedmetadata = () => {
@@ -319,13 +336,13 @@ export class AddVideoModal extends LitElement {
         cleanup();
         resolve(dur);
       };
-      
+
       video.onerror = (e) => {
         cleanup();
         reject(e);
       };
-      
-      video.src = URL.createObjectURL(file);
+
+      video.src = objectUrl;
     });
   }
 
@@ -448,18 +465,22 @@ export class AddVideoModal extends LitElement {
                  @dragleave=${this.handleDragLeave}
                  @drop=${this.handleDrop}
                  @click=${(e: MouseEvent) => {
-                   if ((e.target as HTMLElement).tagName !== 'BUTTON') {
+                   const tag = (e.target as HTMLElement).tagName;
+                   if (tag !== 'BUTTON' && tag !== 'INPUT') {
                      this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
                    }
                  }}>
               <button
                 type="button"
                 class="primary browse-btn"
-                @click=${() => this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
+                @click=${(e: MouseEvent) => {
+                  e.stopPropagation();
+                  this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+                }}>
                 Browse Local Files...
               </button>
               <span>or drag &amp; drop a local video (Max 1.5GB, 10 min)</span>
-              <input type="file" accept="video/*" style="display:none" aria-label="Upload local video file" @change=${this.handleFileInput}>
+              <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi,.ogv" style="display:none" aria-label="Upload local video file" @click=${(e: MouseEvent) => e.stopPropagation()} @change=${this.handleFileInput}>
             </div>
             
             <div class="divider" role="separator" aria-label="or">OR</div>

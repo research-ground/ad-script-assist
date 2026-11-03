@@ -82,6 +82,7 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
   `;
 
   private adapter: YouTubeAdapter | LocalVideoAdapter | null = null;
+  private localPollInterval: number | null = null;
   private readonly unsubscribes: Array<() => void> = [];
 
   private addUnsubscribe(unsub: () => void) {
@@ -116,17 +117,21 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
     for (const unsub of this.unsubscribes) {
       unsub();
     }
+    if (this.localPollInterval !== null) {
+      clearInterval(this.localPollInterval);
+      this.localPollInterval = null;
+    }
     if (this.adapter) {
       this.adapter.destroy();
       this.adapter = null;
     }
   }
 
-  protected override firstUpdated() {
-    this.initPlayer();
-  }
-
   private initPlayer() {
+    if (this.localPollInterval !== null) {
+      clearInterval(this.localPollInterval);
+      this.localPollInterval = null;
+    }
     if (this.adapter) {
       this.adapter.destroy();
       this.adapter = null;
@@ -135,18 +140,17 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
     const container = this.shadowRoot?.getElementById('player-container');
     if (!container) return;
 
-    // We must ensure the container has a sub-element with a unique ID for adapters to attach to
-    let placeholder = this.shadowRoot?.getElementById('video-placeholder');
-    if (!placeholder) {
-      placeholder = document.createElement('div');
-      placeholder.id = 'video-placeholder';
-      placeholder.style.width = '100%';
-      placeholder.style.height = '100%';
-      // Prepend so it sits under the time overlay
-      container.insertBefore(placeholder, container.firstChild);
-    } else {
-      placeholder.innerHTML = '';
+    // Always recreate a fresh div placeholder because YouTubeAdapter replaces
+    // #video-placeholder with an <iframe> element in the DOM.
+    const existingPlaceholder = this.shadowRoot?.getElementById('video-placeholder');
+    if (existingPlaceholder) {
+      existingPlaceholder.remove();
     }
+    const placeholder = document.createElement('div');
+    placeholder.id = 'video-placeholder';
+    placeholder.style.width = '100%';
+    placeholder.style.height = '100%';
+    container.insertBefore(placeholder, container.firstChild);
 
     if (this.localVideoFile) {
       this.adapter = new LocalVideoAdapter(
@@ -164,11 +168,7 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
         (err) => this.dispatchEvent(new CustomEvent('error', {detail: err}))
       );
 
-      // LocalVideoAdapter uses a <video> element. To get time updates, we must poll or listen
-      // We will just poll like YouTubeAdapter does implicitly, or listen to 'timeupdate' on its video element
-      // But actually LocalVideoAdapter creates the <video>. We can just poll here for simplicity
-      // Or we can modify LocalVideoAdapter to dispatch timeupdate. Since it's hidden, let's poll here.
-      setInterval(() => {
+      this.localPollInterval = window.setInterval(() => {
         if (this.adapter) {
           if (this.duration > 0 && appState.get('videoDuration') !== this.duration) {
             appState.set('videoDuration', this.duration);

@@ -114,7 +114,70 @@ export async function callGeminiGenerateContent(
   });
 }
 
-// Track request lifecycle to prevent reuse
+const uploadedVideoCache = new WeakMap<Blob, string>();
+
+function uint8ToBase64(uint8: Uint8Array): string {
+  const CHUNK_SIZE = 30720;
+  const base64Chunks: string[] = [];
+  for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
+    const sub = uint8.subarray(i, i + CHUNK_SIZE);
+    base64Chunks.push(btoa(String.fromCharCode.apply(null, sub as any)));
+  }
+  return base64Chunks.join('');
+}
+
+async function uploadLocalVideoInChunks(
+  videoBlob: Blob,
+  signal?: AbortSignal,
+  forceReupload = false,
+): Promise<string | null> {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  if (!forceReupload) {
+    const cached = uploadedVideoCache.get(videoBlob);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const UPLOAD_CHUNK_BYTES = 512 * 1024; // 512 KB raw (~683 KB base64 JSON, under 1 MB proxy limits)
+  const totalBytes = videoBlob.size;
+  const totalChunks = Math.max(1, Math.ceil(totalBytes / UPLOAD_CHUNK_BYTES));
+  const uploadId = `vid_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const mimeType = videoBlob.type || 'video/mp4';
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * UPLOAD_CHUNK_BYTES;
+    const end = Math.min(totalBytes, start + UPLOAD_CHUNK_BYTES);
+    const slice = videoBlob.slice(start, end);
+    const buf = new Uint8Array(await slice.arrayBuffer());
+    const data = uint8ToBase64(buf);
+
+    try {
+      const res = await fetch('/api/upload-chunk', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          uploadId,
+          chunkIndex,
+          totalChunks,
+          mimeType,
+          data,
+        }),
+        signal,
+      });
+      if (!res.ok) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  uploadedVideoCache.set(videoBlob, uploadId);
+  return uploadId;
+}
 enum RequestState {
   NOT_STARTED,
   REQUEST_SENT,
@@ -284,25 +347,73 @@ class GeminiRequest {
     model: string = DEFAULT_AGENT_MODEL,
     data?: GeminiRequestPlusData,
   ) {
+    const mimeType = videoBlob.type || 'video/mp4';
+
+    const uploadId = await uploadLocalVideoInChunks(
+      videoBlob,
+      this.abortController.signal,
+    );
+
+    if (uploadId) {
+      const parts: Part[] = [
+        {text: prompt},
+        {
+          fileData: {
+            fileUri: `local-upload://${uploadId}`,
+            mimeType,
+          },
+        },
+      ];
+
+      await this.callGemini(
+        parts,
+        model,
+        callback,
+        async (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('UPLOAD_EXPIRED') && !this.isAborted) {
+            const freshId = await uploadLocalVideoInChunks(
+              videoBlob,
+              this.abortController.signal,
+              true,
+            );
+            if (freshId) {
+              this.state = RequestState.NOT_STARTED;
+              await this.callGemini(
+                [
+                  {text: prompt},
+                  {
+                    fileData: {
+                      fileUri: `local-upload://${freshId}`,
+                      mimeType,
+                    },
+                  },
+                ],
+                model,
+                callback,
+                onError,
+                data,
+              );
+              return;
+            }
+          }
+          onError(err);
+        },
+        data,
+      );
+      return;
+    }
+
     const arrayBuffer = await videoBlob.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);
-    // Use a chunk size divisible by 3 (30,720 bytes = 3 * 10,240) so each chunk
-    // can be base64-encoded independently without intermediate '=' padding or
-    // allocating a single giant binary string for 1 GB+ video blobs.
-    const CHUNK_SIZE = 30720;
-    const base64Chunks: string[] = [];
-    for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
-      const sub = uint8.subarray(i, i + CHUNK_SIZE);
-      base64Chunks.push(btoa(String.fromCharCode.apply(null, sub as any)));
-    }
-    const base64 = base64Chunks.join('');
+    const base64 = uint8ToBase64(uint8);
 
     const parts: Part[] = [
       {text: prompt},
       {
         inlineData: {
           data: base64,
-          mimeType: videoBlob.type || 'video/mp4',
+          mimeType,
         },
       },
     ];
