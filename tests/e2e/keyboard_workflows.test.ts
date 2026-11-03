@@ -126,16 +126,12 @@ test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up API Key in Settings');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-
-    const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await apiKeyInput.type(geminiKey);
-
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
-    console.log('✅ Settings saved');
+    console.log('1. Configuring Gemini provider & key via server config state');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'gemini');
+      (window as any).appState.set('geminiApiKey', key);
+    }, geminiKey);
+    console.log('✅ Provider & key configured');
 
     console.log('2. Loading Local Video');
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -255,23 +251,12 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up ChatGPT Provider and Key');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-
-    // Select OpenAI provider
-    await page.evaluate(() => {
-      const select = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal')?.shadowRoot?.querySelector('#provider-select') as HTMLSelectElement;
-      select.value = 'openai';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    const openaiInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await openaiInput.type(openaiKey);
-
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
-    console.log('✅ Settings saved');
+    console.log('1. Configuring OpenAI provider & key via server config state');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'openai');
+      (window as any).appState.set('openaiApiKey', key);
+    }, openaiKey);
+    console.log('✅ Provider & key configured');
 
     console.log('2. Loading Local Video');
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -356,16 +341,12 @@ test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up API Key in Settings');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-
-    const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await apiKeyInput.type(geminiKey);
-
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
-    console.log('✅ Settings saved');
+    console.log('1. Configuring Gemini provider & key via server config state');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'gemini');
+      (window as any).appState.set('geminiApiKey', key);
+    }, geminiKey);
+    console.log('✅ Provider & key configured');
 
     console.log('2. Loading YouTube Video');
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -430,13 +411,11 @@ test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up API Key and loading YouTube Video');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-    const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await apiKeyInput.type(geminiKey);
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
+    console.log('1. Configuring API Key and loading YouTube Video');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'gemini');
+      (window as any).appState.set('geminiApiKey', key);
+    }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
     try {
@@ -504,13 +483,11 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up API Key and loading YouTube Video');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-    const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await apiKeyInput.type(geminiKey);
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
+    console.log('1. Configuring API Key and loading YouTube Video');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'gemini');
+      (window as any).appState.set('geminiApiKey', key);
+    }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
     try {
@@ -600,13 +577,11 @@ test('Workflow 6: Keyboard focus test (YT + Gemini only) (Keyboard navigation)',
   try {
     await clearAppState(page);
 
-    console.log('1. Setting up API Key and loading YouTube Video');
-    await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Settings"]');
-    await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
-    const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-    await apiKeyInput.type(geminiKey);
-    await keyboardActivate(page, 'main-page >>> settings-modal >>> #save-button');
-    await waitForSettingsModalToClose(page);
+    console.log('1. Configuring API Key and loading YouTube Video');
+    await page.evaluate((key) => {
+      (window as any).appState.set('llmProvider', 'gemini');
+      (window as any).appState.set('geminiApiKey', key);
+    }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
     try {

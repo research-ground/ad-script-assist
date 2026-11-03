@@ -236,17 +236,18 @@ export class AgentInput extends LitElement {
           aria-label="Agent Command Input" />
         <button
           id="agentSubmitButton"
+          type="button"
           @click="${this.submit}"
           ?disabled="${isSendDisabled}"
           aria-label="Submit Agent Command"
           title="Submit Agent Command">
-          <span class="material-icons">send</span>
+          <span class="material-icons" aria-hidden="true">send</span>
         </button>
       </div>
       ${this.isApiKeyMissing
         ? html`
-            <div class="warning-message">
-              <span class="material-icons warning-icon">warning</span>
+            <div class="warning-message" role="alert">
+              <span class="material-icons warning-icon" aria-hidden="true">warning</span>
               <span
                 >Gemini API Key is missing. Please configure it in
                 Settings.</span

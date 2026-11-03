@@ -280,6 +280,7 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
         <div
           id="videoTimeOverlay"
           role="timer"
+          aria-label="Video playback time"
           aria-live="off"
           aria-atomic="true">
           ${formatTimeForOverlay(this.currentTime)} /

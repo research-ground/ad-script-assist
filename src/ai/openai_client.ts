@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-import { DEFAULT_AGENT_MODEL, ModelName } from '../core/constants';
+import { DEFAULT_OPENAI_MODEL, proxiedFetch } from '../core/constants';
 import { GeminiRequestPlusData } from '../core/types';
 import { appState } from '../core/app_state';
 import { validateApiKeyForProvider } from './describe_error';
@@ -22,7 +22,7 @@ import { validateApiKeyForProvider } from './describe_error';
 export function getOpenAIApiKey(): string {
   let apiKey = '';
   if (typeof window !== 'undefined') {
-    apiKey = appState.get('openaiApiKey') || appState.get('geminiApiKey') || '';
+    apiKey = appState.get('openaiApiKey') || '';
   } else if (typeof process !== 'undefined' && process.env) {
     apiKey = process.env.OPENAI_API_KEY || '';
   }
@@ -68,20 +68,24 @@ export class OpenAIRequest {
     try {
       const apiKey = getOpenAIApiKey().trim();
       if (!apiKey) {
-        throw new Error('No OpenAI API key configured. Open Settings to add one.');
+        throw new Error('No OpenAI API key configured. Please add openai_api_key in models.conf.');
       }
       const keyMismatch = validateApiKeyForProvider(apiKey, 'openai', 'VLM');
       if (keyMismatch) {
         throw new Error(keyMismatch);
       }
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const resolvedModel =
+        modelName ||
+        (typeof window !== 'undefined' ? appState.get('openaiModel') : '') ||
+        DEFAULT_OPENAI_MODEL;
+      const response = await proxiedFetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model: resolvedModel,
           messages: messages,
           max_tokens: 4096,
           response_format: { type: "json_object" },

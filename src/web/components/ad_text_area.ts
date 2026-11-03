@@ -86,30 +86,28 @@ export class AdTextArea extends LitElement {
       gap: 5px;
     }
 
-    .cue-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
+    .cue-indicator {
+      width: 7px;
+      height: 7px;
       flex-shrink: 0;
       display: inline-block;
+      box-sizing: border-box;
     }
 
-    .cue-dot.ready {
-      background-color: #1e8e3e;
+    .cue-indicator.pending {
+      background-color: #202124;
+      border-radius: 1px;
     }
 
-    .cue-dot.generating {
+    .cue-indicator.generating {
       background-color: #f9ab00;
-      animation: cue-pulse 1s ease-in-out infinite;
+      border-radius: 50%;
     }
 
-    .cue-dot.failed {
-      background-color: #d93025;
-    }
-
-    @keyframes cue-pulse {
-      0%, 100% { opacity: 0.35; }
-      50% { opacity: 1; }
+    .cue-indicator.ready {
+      background-color: #1e8e3e;
+      border-radius: 1px;
+      transform: rotate(45deg);
     }
 
     textarea {
@@ -136,8 +134,6 @@ export class AdTextArea extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.setAttribute('role', 'region');
-    this.setAttribute('aria-label', 'Ad Text Editor');
   }
 
   override firstUpdated() {
@@ -306,8 +302,8 @@ export class AdTextArea extends LitElement {
     return (textBefore.match(/\n/g) || []).length + 1;
   }
 
-  private getCueStatusByLine(): Map<number, 'ready' | 'generating' | 'failed'> {
-    const statusMap = new Map<number, 'ready' | 'generating' | 'failed'>();
+  private getCueStatusByLine(): Map<number, 'ready' | 'generating' | 'pending'> {
+    const statusMap = new Map<number, 'ready' | 'generating' | 'pending'>();
     if (!this.value || !this.segments || this.segments.length === 0) {
       return statusMap;
     }
@@ -316,13 +312,22 @@ export class AdTextArea extends LitElement {
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes('-->')) {
         const seg = this.segments[cueIdx];
-        if (seg && seg.script.trim().length > 0) {
+        let textLineIdx = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          const trimmed = lines[j].trim();
+          if (trimmed === '' || trimmed.includes('-->')) {
+            break;
+          }
+          textLineIdx = j;
+          break;
+        }
+        if (textLineIdx !== -1 && seg && seg.script.trim().length > 0) {
           if (seg.audioData) {
-            statusMap.set(i + 1, 'ready');
-          } else if (seg.generationFailed) {
-            statusMap.set(i + 1, 'failed');
-          } else if (this.isGenerating) {
-            statusMap.set(i + 1, 'generating');
+            statusMap.set(textLineIdx + 1, 'ready');
+          } else if (this.isGenerating && !seg.generationFailed) {
+            statusMap.set(textLineIdx + 1, 'generating');
+          } else {
+            statusMap.set(textLineIdx + 1, 'pending');
           }
         }
         cueIdx++;
@@ -339,13 +344,13 @@ export class AdTextArea extends LitElement {
           ${this.lineNumbers.map((n) => {
             const status = typeof n === 'number' ? cueStatusByLine.get(n) : undefined;
             const title = status === 'ready'
-              ? 'Speech generated'
+              ? 'Speech rendered'
               : status === 'generating'
-                ? 'Generating speech...'
-                : status === 'failed'
-                  ? 'Speech generation failed'
+                ? 'Rendering speech (using Web Speech fallback during playback)...'
+                : status === 'pending'
+                  ? 'Speech not yet rendered (using Web Speech fallback during playback)'
                   : '';
-            return html`<div>${status ? html`<span class="cue-dot ${status}" title="${title}"></span>` : ''}${n || '\u00A0'}</div>`;
+            return html`<div>${status ? html`<span class="cue-indicator ${status}" title="${title}"></span>` : ''}${n || '\u00A0'}</div>`;
           })}
         </div>
         <textarea
@@ -360,7 +365,7 @@ export class AdTextArea extends LitElement {
           spellcheck="false"
           aria-label="${this.ariaLabelText ||
           this.placeholder ||
-          'Ad Text Editor input'}"></textarea>
+          'Ad Text Editor'}"></textarea>
       </div>
     `;
   }

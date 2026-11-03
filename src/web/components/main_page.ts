@@ -255,6 +255,13 @@ export class MainPage extends LitElement {
       font-size: 0.85rem;
     }
 
+    .form-select:focus-visible,
+    input[type="checkbox"]:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--accent-color);
+      outline-offset: 2px;
+    }
+
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -336,16 +343,19 @@ export class MainPage extends LitElement {
     .speech-dot {
       width: 7px;
       height: 7px;
-      border-radius: 50%;
       display: inline-block;
+      box-sizing: border-box;
+      border-radius: 1px;
     }
 
     .speech-dot.ready {
       background-color: #1e8e3e;
+      transform: rotate(45deg);
     }
 
     .speech-dot.pending {
       background-color: #f9ab00;
+      border-radius: 50%;
     }
 
     .ad-header-status .loading-spinner {
@@ -370,7 +380,6 @@ export class MainPage extends LitElement {
 
   override async connectedCallback() {
     super.connectedCallback();
-    this.setAttribute('role', 'main');
 
     this.controller.registerUICallbacks({
       onScriptUpdate: (script) => {
@@ -643,8 +652,8 @@ export class MainPage extends LitElement {
 
     if (this.isAdAudioGenerating) {
       return html`
-        <div class="ad-header-status" aria-live="polite">
-          <span class="loading-spinner"></span>
+        <div class="ad-header-status" role="status" aria-live="polite">
+          <span class="loading-spinner" aria-hidden="true"></span>
           <span>${total > 0 ? `Generating speech (${ready}/${total})...` : 'Generating speech...'}</span>
         </div>
       `;
@@ -656,16 +665,16 @@ export class MainPage extends LitElement {
 
     if (ready === total) {
       return html`
-        <div class="ad-header-status speech-ready" title="Speech generated for all ${total} cue(s)">
-          <span class="speech-dot ready"></span>
+        <div class="ad-header-status speech-ready" role="status" aria-live="polite" title="Speech generated for all ${total} cue(s)">
+          <span class="speech-dot ready" aria-hidden="true"></span>
           <span>Speech ready (${ready})</span>
         </div>
       `;
     }
 
     return html`
-      <div class="ad-header-status" title="Speech generated for ${ready} of ${total} cue(s)">
-        <span class="speech-dot pending"></span>
+      <div class="ad-header-status" role="status" aria-live="polite" title="Speech generated for ${ready} of ${total} cue(s)">
+        <span class="speech-dot pending" aria-hidden="true"></span>
         <span>Speech ${ready}/${total}</span>
       </div>
     `;
@@ -743,8 +752,8 @@ export class MainPage extends LitElement {
           </section>
 
           <!-- Project Settings Section -->
-          <section class="project-settings-section">
-            <h2>Project Settings</h2>
+          <section class="project-settings-section" aria-labelledby="project-settings-heading">
+            <h2 id="project-settings-heading">Project Settings</h2>
             <div class="settings-content">
               <div class="settings-subsection" role="group" aria-labelledby="voice-settings-heading" style="width: 100%; display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color, #dadce0);">
                 <h3 id="voice-settings-heading" style="margin: 0; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--secondary-text, #5f6368);">Voice Settings</h3>

@@ -20,7 +20,7 @@ import { Page } from 'puppeteer';
 
 async function runSettingsTest(page: Page, useKeyboard: boolean) {
   console.log(`--- Testing Settings Persistence (${useKeyboard ? 'Keyboard' : 'Mouse'}) ---`);
-  
+
   const activate = async (selector: string) => {
     if (useKeyboard) {
       const el = await page.locator(selector).waitHandle();
@@ -35,72 +35,64 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
   await activate('main-page >>> top-bar >>> button[aria-label="Settings"]');
   await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
   await page.waitForSelector('main-page >>> settings-modal >>> #language-select', { timeout: 5000 });
-  
-  // Change VLM and TTS API Keys
-  const apiKeyInput = await page.locator('main-page >>> settings-modal >>> #api-key-input').waitHandle();
-  await apiKeyInput.evaluate((el: HTMLInputElement) => el.value = ''); // clear it
-  await apiKeyInput.type('TEST_API_KEY_123');
-  
-  const ttsApiKeyInput = await page.locator('main-page >>> settings-modal >>> #tts-api-key-input').waitHandle();
-  await ttsApiKeyInput.evaluate((el: HTMLInputElement) => el.value = ''); // clear it
-  await ttsApiKeyInput.type('TEST_TTS_KEY_456');
-  
+
+  // Change TTS Engine to Local Kokoro
+  const ttsSelect = await page.locator('main-page >>> settings-modal >>> #tts-provider-select').waitHandle();
+  await ttsSelect.evaluate((el: HTMLSelectElement) => {
+    el.value = 'kokoro';
+    el.dispatchEvent(new Event('change'));
+  });
+
   // Change Language
   const langSelect = await page.locator('main-page >>> settings-modal >>> #language-select').waitHandle();
   await langSelect.evaluate((el: HTMLSelectElement) => {
     el.value = 'es-ES';
     el.dispatchEvent(new Event('change'));
   });
-  
+
   // Change first Hotkey
   const hotkeyInput = await page.locator('main-page >>> settings-modal >>> .hotkey-input-keycombo').waitHandle();
   await hotkeyInput.evaluate((el: HTMLInputElement) => {
     el.value = 'Ctrl+Shift+Z';
     el.dispatchEvent(new Event('input'));
   });
-  
+
   // Save Changes
   await activate('main-page >>> settings-modal >>> #save-button');
   await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { hidden: true, timeout: 5000 });
   console.log('✅ Settings saved and modal closed');
-  
+
   // Reload page
   await page.reload({ waitUntil: 'load' });
   console.log('✅ Page reloaded');
-  
+
   await page.waitForSelector('main-page >>> top-bar', { timeout: 15000 });
-  
+
   // Open Settings Modal again
   await activate('main-page >>> top-bar >>> button[aria-label="Settings"]');
   await page.waitForSelector('main-page >>> settings-modal >>> dialog[open]', { visible: true, timeout: 5000 });
   await page.waitForSelector('main-page >>> settings-modal >>> #language-select', { timeout: 5000 });
-  
+
   // Verify changes persisted
-  const savedApiKey = await page.evaluate(() => {
+  const savedTts = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#api-key-input')?.value;
+    return modal?.shadowRoot?.querySelector<HTMLSelectElement>('#tts-provider-select')?.value;
   });
-  if (savedApiKey !== 'TEST_API_KEY_123') throw new Error(`API Key didn't persist! Got: ${savedApiKey}`);
-  
-  const savedTtsKey = await page.evaluate(() => {
-    const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#tts-api-key-input')?.value;
-  });
-  if (savedTtsKey !== 'TEST_TTS_KEY_456') throw new Error(`TTS Key didn't persist! Got: ${savedTtsKey}`);
-  
+  if (savedTts !== 'kokoro') throw new Error(`TTS provider didn't persist! Got: ${savedTts}`);
+
   const savedLang = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
     return modal?.shadowRoot?.querySelector<HTMLSelectElement>('#language-select')?.value;
   });
   if (savedLang !== 'es-ES') throw new Error(`Language didn't persist! Got: ${savedLang}`);
-  
+
   const savedHotkey = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
     return modal?.shadowRoot?.querySelector<HTMLInputElement>('.hotkey-input-keycombo')?.value;
   });
   if (savedHotkey !== 'Ctrl+Shift+Z') throw new Error(`Hotkey didn't persist! Got: ${savedHotkey}`);
   console.log('✅ Settings persisted successfully');
-  
+
   // Reset Settings
   console.log('Testing Settings Reset...');
   if (useKeyboard) {
@@ -113,7 +105,7 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
       btn?.click();
     });
   }
-  
+
   await page.waitForSelector('confirm-modal >>> dialog[open]', { visible: true, timeout: 5000 });
   if (useKeyboard) {
     const confirmBtn = await page.locator('confirm-modal >>> .footer button.destructive').waitHandle();
@@ -126,20 +118,16 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
   }
   // Wait a bit for processing
   await new Promise(r => setTimeout(r, 500));
-  
+
   // Verify default settings
-  const resetApiKey = await page.evaluate(() => {
+  const resetTts = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#api-key-input')?.value;
+    return modal?.shadowRoot?.querySelector<HTMLSelectElement>('#tts-provider-select')?.value;
   });
-  if (resetApiKey !== '') throw new Error(`API Key didn't reset! Got: ${resetApiKey}`);
-  
-  const resetTtsKey = await page.evaluate(() => {
-    const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
-    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#tts-api-key-input')?.value;
-  });
-  if (resetTtsKey !== '') throw new Error(`TTS Key didn't reset! Got: ${resetTtsKey}`);
-  
+  if (resetTts !== 'gemini' && resetTts !== 'openai') {
+    throw new Error(`TTS provider didn't reset! Got: ${resetTts}`);
+  }
+
   const resetLang = await page.evaluate(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
     return modal?.shadowRoot?.querySelector<HTMLSelectElement>('#language-select')?.value;

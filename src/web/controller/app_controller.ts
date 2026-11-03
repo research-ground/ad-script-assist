@@ -43,6 +43,7 @@ import { describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
 import {
   DEFAULT_AGENT_MODEL,
+  DEFAULT_OPENAI_MODEL,
   getDefaultVoiceForTtsProvider,
   getInjectedGeminiApiKey,
   getVoicesForTtsProvider,
@@ -57,7 +58,11 @@ export class AppController {
 
   // Playback audio elements
   private readonly adAudio = new Audio();
+  private readonly segmentAudio = new Audio();
+  private segmentBlobUrl: string | null = null;
   private compiledAdTrackUrl: string | null = null;
+  private lastSpokenSegmentIndex = -1;
+  private isWebSpeechActive = false;
 
   private hotkeyManager = new HotkeyManager();
   private hotkeysUpdatedListener?: () => void;
@@ -93,6 +98,9 @@ export class AppController {
   }
 
   public async initialize() {
+    // 0. Ensure server config (providers, models, key placeholders) is loaded first
+    await appState.loadServerConfig();
+
     // 1. Hotkeys Init
     const configs = await retrieveHotkeyConfigsFromDB();
     this.hotkeyManager.setConfigs(configs);
@@ -112,7 +120,7 @@ export class AppController {
           this.adAudio.load();
           const speak = appState.get('speakAdText') ?? true;
           const player = appState.get('videoPlayerApi');
-          if (speak && player && !player.paused) {
+          if (speak && player && !player.paused && !this.isFallbackSpeaking()) {
             this.adAudio.currentTime = player.currentTime;
             void this.adAudio.play().catch(() => {});
           }
@@ -128,11 +136,11 @@ export class AppController {
       appState.subscribe('speakAdText', (speak) => {
         if (!speak) {
           this.adAudio.pause();
+          this.stopSegmentPlayback();
         } else {
           const player = appState.get('videoPlayerApi');
-          if (player && !player.paused && this.compiledAdTrackUrl) {
-            this.adAudio.currentTime = player.currentTime;
-            void this.adAudio.play().catch(() => {});
+          if (player && !player.paused) {
+            this.syncAdAudioWithVideo();
           }
         }
       })
@@ -143,14 +151,8 @@ export class AppController {
       appState.subscribe('isVideoPaused', (paused) => {
         if (paused) {
           this.adAudio.pause();
+          this.stopSegmentPlayback();
         } else {
-          if (this.shouldBlockPlaybackWhileGenerating()) {
-            const player = appState.get('videoPlayerApi');
-            player?.pause();
-            appState.set('isVideoPaused', true);
-            this.alertSpeechGenerating();
-            return;
-          }
           this.syncAdAudioWithVideo();
         }
       })
@@ -189,48 +191,158 @@ export class AppController {
     this.unsubscribes = [];
     this.adAudio.pause();
     this.adAudio.src = '';
+    this.stopSegmentPlayback();
   }
 
   // --- Playback Sync ---
+
+  private isFallbackSpeaking(): boolean {
+    return (
+      this.isWebSpeechActive ||
+      (!this.segmentAudio.paused && !this.segmentAudio.ended)
+    );
+  }
+
+  private stopSegmentPlayback() {
+    this.lastSpokenSegmentIndex = -1;
+    this.isWebSpeechActive = false;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    this.segmentAudio.pause();
+    this.segmentAudio.src = '';
+    if (this.segmentBlobUrl) {
+      URL.revokeObjectURL(this.segmentBlobUrl);
+      this.segmentBlobUrl = null;
+    }
+  }
+
+  private speakFallbackForTime(currentTime: number) {
+    const segments = appState.get('adSegments') || [];
+    const activeIdx = segments.findIndex(
+      (s) =>
+        s.script.trim().length > 0 &&
+        currentTime >= s.startTime &&
+        currentTime < s.endTime,
+    );
+
+    if (activeIdx === -1) {
+      this.lastSpokenSegmentIndex = -1;
+      return;
+    }
+
+    if (activeIdx === this.lastSpokenSegmentIndex) {
+      return;
+    }
+
+    this.lastSpokenSegmentIndex = activeIdx;
+    const seg = segments[activeIdx];
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    this.isWebSpeechActive = false;
+    this.segmentAudio.pause();
+    if (this.segmentBlobUrl) {
+      URL.revokeObjectURL(this.segmentBlobUrl);
+      this.segmentBlobUrl = null;
+    }
+
+    if (seg.audioData && seg.audioData.byteLength > 0) {
+      const blob = new Blob([seg.audioData], {type: 'audio/wav'});
+      this.segmentBlobUrl = URL.createObjectURL(blob);
+      this.segmentAudio.src = this.segmentBlobUrl;
+      const offset = Math.max(0, currentTime - seg.startTime);
+      this.segmentAudio.currentTime = offset;
+      void this.segmentAudio.play().catch(() => {});
+      return;
+    }
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(seg.script);
+      utterance.lang = appState.get('ttsLanguage') || 'en-US';
+      this.isWebSpeechActive = true;
+      utterance.onend = () => {
+        this.isWebSpeechActive = false;
+      };
+      utterance.onerror = () => {
+        this.isWebSpeechActive = false;
+      };
+      window.speechSynthesis.speak(utterance);
+    }
+  }
 
   public syncAdAudioWithVideo() {
     const speakAdText = appState.get('speakAdText') ?? true;
     if (!speakAdText) {
       this.adAudio.pause();
+      this.stopSegmentPlayback();
       return;
     }
     const player = appState.get('videoPlayerApi');
     if (!player) return;
     const targetTime = player.currentTime;
-    if (Math.abs(this.adAudio.currentTime - targetTime) > 0.2) {
-      try {
-        this.adAudio.currentTime = targetTime;
-      } catch (e) {}
+    const isPlaying = !player.paused && !appState.get('isVideoPaused');
+
+    if (this.compiledAdTrackUrl) {
+      this.stopSegmentPlayback();
+      if (Math.abs(this.adAudio.currentTime - targetTime) > 0.2) {
+        try {
+          this.adAudio.currentTime = targetTime;
+        } catch (e) {}
+      }
+      if (isPlaying) {
+        void this.adAudio.play().catch(() => {});
+      } else {
+        this.adAudio.pause();
+      }
+      return;
     }
-    if (!player.paused) {
-      void this.adAudio.play().catch(() => {});
-    } else {
-      this.adAudio.pause();
+
+    if (!isPlaying) {
+      this.stopSegmentPlayback();
+      return;
     }
+
+    const segments = appState.get('adSegments') || [];
+    const activeIdx = segments.findIndex(
+      (s) =>
+        s.script.trim().length > 0 &&
+        targetTime >= s.startTime &&
+        targetTime < s.endTime,
+    );
+    if (activeIdx === -1 || activeIdx !== this.lastSpokenSegmentIndex) {
+      this.stopSegmentPlayback();
+    }
+    this.speakFallbackForTime(targetTime);
   }
 
   public handleTimeUpdate(currentTime: number) {
     const speakAdText = appState.get('speakAdText') ?? true;
     if (!speakAdText) {
       this.adAudio.pause();
+      this.stopSegmentPlayback();
       return;
     }
     const player = appState.get('videoPlayerApi');
     if (!player) return;
 
-    // Sync compiled ad track if needed
+    // Sync compiled ad track if ready and no fallback speech is mid-utterance
     if (this.compiledAdTrackUrl && !player.paused) {
+      if (this.isFallbackSpeaking()) {
+        return;
+      }
       if (Math.abs(this.adAudio.currentTime - currentTime) > 0.3) {
         this.adAudio.currentTime = currentTime;
       }
       if (this.adAudio.paused) {
         void this.adAudio.play().catch(() => {});
       }
+      return;
+    }
+
+    if (!player.paused) {
+      this.speakFallbackForTime(currentTime);
     }
   }
 
@@ -271,6 +383,7 @@ export class AppController {
   private resetVideoState() {
     this.adAudio.pause();
     this.adAudio.src = '';
+    this.stopSegmentPlayback();
     appState.set('adSegments', []);
     appState.set('conversationLog', []);
     if (this.onScriptUpdateCallback) {
@@ -289,6 +402,13 @@ export class AppController {
     const newSegments = this.adParser.parse(scriptText, videoId);
     const comparedSegments = this.adParser.compare(oldSegments, newSegments);
 
+    const hasUnrendered = comparedSegments.some(
+      (s) => s.changed || (s.script.trim() !== '' && !s.audioData),
+    );
+    if (hasUnrendered) {
+      appState.set('compiledAdTrackUrl', null);
+    }
+
     appState.set('adSegments', comparedSegments);
     void storeLatestAdScriptToDB(videoId, scriptText);
     if (regenerateAudio) {
@@ -302,41 +422,14 @@ export class AppController {
     void this.hotkeyManager.init(actions);
   }
 
-  private shouldBlockPlaybackWhileGenerating(): boolean {
-    const speakAdText = appState.get('speakAdText') ?? true;
-    if (!speakAdText) return false;
-    if (appState.get('isAdAudioGenerating')) return true;
-    const segments = (appState.get('adSegments') || []).filter((s) => s.script.trim() !== '');
-    if (segments.length === 0) return false;
-    return segments.some((s) => !s.audioData && !s.generationFailed);
-  }
-
-  private alertSpeechGenerating() {
-    appState.set('statusMessage', 'Speech is still generating. Please wait a moment before playing.');
-    void showConfirm(
-      'Speech Still Generating',
-      'Audio description speech is still being generated. Please wait a moment before playing.',
-      'OK',
-      '',
-    );
-  }
-
   public async togglePlayPause() {
     const player = appState.get('videoPlayerApi');
     if (!player) return;
 
     const isPaused = appState.get('isVideoPaused');
     if (isPaused) {
-      if (this.shouldBlockPlaybackWhileGenerating()) {
-        if (!appState.get('isAdAudioGenerating')) {
-          void adAudioManager.regenerateAdAudio();
-        }
-        player.pause();
-        appState.set('isVideoPaused', true);
-        this.alertSpeechGenerating();
-        return;
-      }
-      // Trigger audio generation in the background if needed
+      // Trigger audio generation in the background if needed; playback starts
+      // immediately and falls back to Web Speech API for any unrendered cues.
       void adAudioManager.regenerateAdAudio();
     }
 
@@ -483,7 +576,7 @@ export class AppController {
 
       const provider = appState.get('llmProvider') || 'gemini';
       if (provider === 'none') {
-        const msg = 'VLM provider is set to None. Select Google Gemini or OpenAI in Settings to use AI features.';
+        const msg = 'VLM provider is set to None. Configure ai_provider in models.conf to use AI features.';
         appState.set('statusMessage', msg);
         this.appendAgentMessage(`⚠️ ${msg}`, videoId, false);
         appState.set('isAgentResponding', false);
@@ -497,7 +590,10 @@ export class AppController {
       }
       this.activeRequest = request;
 
-      const model = appState.get('agentModel') || DEFAULT_AGENT_MODEL;
+      const model =
+        provider === 'openai'
+          ? appState.get('openaiModel') || DEFAULT_OPENAI_MODEL
+          : appState.get('agentModel') || DEFAULT_AGENT_MODEL;
       const data: GeminiRequestPlusData = {
         videoId,
         adTextBefore: context.adScriptText || '',
@@ -560,12 +656,10 @@ export class AppController {
       const onError = (error: unknown) => {
         console.error('AI Error:', error);
         const source = provider === 'openai' ? 'OpenAI' : model;
-        const hint = provider === 'gemini' && !getInjectedGeminiApiKey()
-          ? ' You can try a different model in Settings.' : '';
         const errMsg = describeError(error, provider).replace(/\.?$/, '.');
         appState.set('statusMessage', `Error from ${source}: ${errMsg}`);
         this.appendAgentMessage(
-          `⚠️ Error from ${source}: ${errMsg}${hint}`, videoId, false);
+          `⚠️ Error from ${source}: ${errMsg}`, videoId, false);
         this.activeRequest = null;
         appState.set('isAgentResponding', false);
       };
@@ -575,13 +669,13 @@ export class AppController {
           await request.callGeminiWithLocalVideo(prompt, localFile, onResponse, onError, model, data);
         } else {
           const frames = await extractFramesFromVideoBlob(localFile);
-          await request.callOpenAIWithFrames(prompt, frames, onResponse, onError, 'gpt-4o', data);
+          await request.callOpenAIWithFrames(prompt, frames, onResponse, onError, model, data);
         }
       } else {
         if (request instanceof GeminiRequest) {
           await request.callGeminiWithYouTubeURL(prompt, ytUrl, onResponse, onError, model, data);
         } else {
-          await request.callOpenAIWithYouTubeURL(prompt, ytUrl, onResponse, onError, 'gpt-4o', data);
+          await request.callOpenAIWithYouTubeURL(prompt, ytUrl, onResponse, onError, model, data);
         }
       }
 
@@ -722,37 +816,11 @@ export class AppController {
   // --- Settings Management ---
 
   public async saveSettings(settings: {
-    geminiApiKey?: string;
-    openaiApiKey?: string;
-    llmProvider?: 'gemini' | 'openai' | 'none';
     ttsProvider?: 'gemini' | 'openai' | 'kokoro';
-    ttsApiKey?: string;
     ttsLanguage?: string;
     ttsVoice?: string;
-    agentModel?: string;
-    speechModel?: string;
     hotkeys?: HotkeyConfigEntry[];
   }) {
-    const hasInjectedKey = Boolean(getInjectedGeminiApiKey());
-    if (!hasInjectedKey) {
-      if (settings.geminiApiKey !== undefined) {
-        appState.set('geminiApiKey', settings.geminiApiKey);
-      }
-      if (settings.openaiApiKey !== undefined) {
-        appState.set('openaiApiKey', settings.openaiApiKey);
-      }
-      if (settings.llmProvider !== undefined) {
-        appState.set('llmProvider', settings.llmProvider);
-      }
-      if (settings.agentModel !== undefined) {
-        appState.set('agentModel', settings.agentModel.trim());
-      }
-      if (settings.speechModel !== undefined) {
-        appState.set('speechModel', settings.speechModel.trim());
-      }
-    } else {
-      appState.set('llmProvider', 'gemini');
-    }
     if (settings.ttsProvider !== undefined) {
       appState.set('ttsProvider', settings.ttsProvider);
       const validVoices = getVoicesForTtsProvider(settings.ttsProvider);
@@ -760,9 +828,6 @@ export class AppController {
       if (!validVoices.some((v) => v.name === currentVoice)) {
         appState.set('ttsVoice', getDefaultVoiceForTtsProvider(settings.ttsProvider));
       }
-    }
-    if (settings.ttsApiKey !== undefined) {
-      appState.set('ttsApiKey', settings.ttsApiKey);
     }
     if (settings.ttsLanguage !== undefined) {
       appState.set('ttsLanguage', settings.ttsLanguage);
@@ -776,7 +841,7 @@ export class AppController {
       const updatedConfigs = await retrieveHotkeyConfigsFromDB();
       this.hotkeyManager.setConfigs(updatedConfigs);
     }
-    
+
     window.dispatchEvent(new CustomEvent('hotkeys-updated'));
   }
 
@@ -785,15 +850,11 @@ export class AppController {
     const newHotkeys = await retrieveHotkeyConfigsFromDB();
     this.hotkeyManager.setConfigs(newHotkeys);
 
-    appState.set('geminiApiKey', '');
-    appState.set('openaiApiKey', '');
-    appState.set('llmProvider', 'gemini');
-    appState.set('ttsProvider', 'gemini');
-    appState.set('ttsApiKey', '');
+    const cloudTtsProvider = appState.get('cloudTtsProvider') || 'gemini';
+    appState.set('ttsProvider', cloudTtsProvider);
     appState.set('ttsLanguage', 'en-US');
-    appState.set('ttsVoice', 'Aoede');
-    appState.set('agentModel', '');
-    appState.set('speechModel', '');
+    appState.set('ttsVoice', getDefaultVoiceForTtsProvider(cloudTtsProvider));
+    await appState.loadServerConfig();
 
     window.dispatchEvent(new CustomEvent('hotkeys-updated'));
   }
@@ -805,13 +866,13 @@ export class AppController {
     const isGenerating = appState.get('isAdAudioGenerating');
     const isResponding = appState.get('isAgentResponding');
     const llmProvider = appState.get('llmProvider') || 'gemini';
+    const activeKey =
+      llmProvider === 'openai'
+        ? appState.get('openaiApiKey')?.trim() || appState.get('geminiApiKey')?.trim()
+        : appState.get('geminiApiKey')?.trim();
     const hasVlmKey =
       llmProvider !== 'none' &&
-      Boolean(
-        getInjectedGeminiApiKey() ||
-          appState.get('geminiApiKey')?.trim() ||
-          appState.get('openaiApiKey')?.trim(),
-      );
+      Boolean(getInjectedGeminiApiKey() || activeKey);
 
     appState.set('isPlayEnabled', !!videoId);
     appState.set('isGenerateEnabled', !!videoId && hasVlmKey && !isResponding);

@@ -1,5 +1,6 @@
 {
   "name": "AD Script Assist",
   "description": "An AI-driven interactive helper for creating, editing, and mixing audio descriptions (AD) for videos.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

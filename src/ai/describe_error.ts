@@ -29,14 +29,14 @@ export function validateApiKeyForProvider(
   serviceLabel: 'VLM' | 'TTS' = 'VLM',
 ): string | null {
   const trimmed = (apiKey || '').trim();
-  if (!trimmed) {
+  if (!trimmed || trimmed.startsWith('__SERVER_KEY')) {
     return null;
   }
   if (provider === 'gemini' && trimmed.startsWith('sk-')) {
-    return `The ${serviceLabel} API key starts with "sk-", which looks like an OpenAI key rather than a Google Gemini key (Gemini keys start with "AIza"). Please check your ${serviceLabel} provider and API key in Settings.`;
+    return `The ${serviceLabel} API key starts with "sk-", which looks like an OpenAI key rather than a Google Gemini key (Gemini keys start with "AIza"). Please check your ${serviceLabel} provider and API key in models.conf.`;
   }
   if (provider === 'openai' && trimmed.startsWith('AIza')) {
-    return `The ${serviceLabel} API key starts with "AIza", which looks like a Google Gemini key rather than an OpenAI key (OpenAI keys start with "sk-"). Please check your ${serviceLabel} provider and API key in Settings.`;
+    return `The ${serviceLabel} API key starts with "AIza", which looks like a Google Gemini key rather than an OpenAI key (OpenAI keys start with "sk-"). Please check your ${serviceLabel} provider and API key in models.conf.`;
   }
   return null;
 }

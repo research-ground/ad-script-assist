@@ -1,0 +1,28 @@
+# ============================================================================
+# AD Script Assist — Providers, Models & API Keys (models.conf)
+# ============================================================================
+# This file is read ONLY by the Node.js server (src/server.ts).
+# API keys placed under [keys] are NEVER sent to the browser.
+
+[providers]
+# Active AI Vision / Q&A provider: gemini | openai
+ai_provider = gemini
+
+# Cloud Text-to-Speech provider when a cloud voice is selected in the UI:
+#   gemini | openai
+# (Users can still switch between Cloud TTS and Local Kokoro Browser TTS in the Settings UI)
+cloud_tts_provider = gemini
+
+[models]
+# Vision & Q&A model IDs
+gemini_model = gemini-3.8-flash
+openai_model = gpt-4o
+
+# Cloud Text-to-Speech model IDs
+gemini_tts_model = gemini-3.1-flash-tts-preview
+openai_tts_model = tts-1
+
+[keys]
+# Leave blank in Google AI Studio if GEMINI_API_KEY is injected automatically.
+gemini_api_key =
+openai_api_key =

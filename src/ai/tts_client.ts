@@ -15,16 +15,18 @@
  */
 
 import {ttsCache} from '../web/storage/tts_cache';
-import {getAI, resolveGeminiApiKey} from './gemini_client';
+import {callGeminiGenerateContent, resolveGeminiApiKey} from './gemini_client';
 import {getOpenAIApiKey} from './openai_client';
 import {generateKokoroPcm} from './kokoro_tts';
 import {appState} from '../core/app_state';
 import {
   DEFAULT_KOKORO_VOICE,
+  DEFAULT_OPENAI_TTS_MODEL,
   DEFAULT_SPEECH_MODEL,
   isGeminiVoice,
   isKokoroVoice,
   isOpenAIVoice,
+  proxiedFetch,
 } from '../core/constants';
 import {describeError, validateApiKeyForProvider} from './describe_error';
 
@@ -121,14 +123,17 @@ export async function generateTTS(
 
       if (ttsProvider === 'openai') {
         const openAiVoice = isOpenAIVoice(voiceName) ? voiceName : 'alloy';
-        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        const openAiTtsModel =
+          (typeof window !== 'undefined' ? appState.get('openaiTtsModel') : '') ||
+          DEFAULT_OPENAI_TTS_MODEL;
+        const response = await proxiedFetch('https://api.openai.com/v1/audio/speech', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${resolvedTtsKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'tts-1',
+            model: openAiTtsModel,
             voice: openAiVoice,
             input: text,
           }),
@@ -150,9 +155,10 @@ export async function generateTTS(
         return blobToBase64(audioBlob);
       } else {
         const geminiVoice = isGeminiVoice(voiceName) ? voiceName : 'Aoede';
-        const ai = await getAI(resolvedTtsKey);
-        const response = await ai.models.generateContent({
-          model: appState.get('speechModel') || DEFAULT_SPEECH_MODEL,
+        const response = await callGeminiGenerateContent(resolvedTtsKey, {
+          model:
+            (typeof window !== 'undefined' ? appState.get('speechModel') : '') ||
+            DEFAULT_SPEECH_MODEL,
           contents: text,
           config: {
             responseModalities: ['AUDIO'],

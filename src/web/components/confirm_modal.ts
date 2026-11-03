@@ -33,6 +33,15 @@ export class ConfirmModal extends LitElement {
   @state() private isDestructive: boolean = false;
 
   private resolvePromise: ((value: boolean) => void) | null = null;
+  private previouslyFocusedElement: HTMLElement | null = null;
+
+  private getDeepActiveElement(): HTMLElement | null {
+    let current: Element | null = document.activeElement;
+    while (current?.shadowRoot?.activeElement) {
+      current = current.shadowRoot.activeElement;
+    }
+    return current instanceof HTMLElement ? current : null;
+  }
 
   static override styles = css`
     dialog {
@@ -132,6 +141,7 @@ export class ConfirmModal extends LitElement {
 
     return new Promise(async (resolve) => {
       this.resolvePromise = resolve;
+      this.previouslyFocusedElement = this.getDeepActiveElement();
       await this.updateComplete;
       this.dialog.showModal();
     });
@@ -141,12 +151,16 @@ export class ConfirmModal extends LitElement {
     if (this.resolvePromise) this.resolvePromise(true);
     this.resolvePromise = null;
     this.dialog.close();
+    this.previouslyFocusedElement?.focus();
+    this.previouslyFocusedElement = null;
   }
 
   private handleCancel() {
     if (this.resolvePromise) this.resolvePromise(false);
     this.resolvePromise = null;
     this.dialog.close();
+    this.previouslyFocusedElement?.focus();
+    this.previouslyFocusedElement = null;
   }
 
   private handleDialogCancel(e: Event) {

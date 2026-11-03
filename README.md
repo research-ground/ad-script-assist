@@ -20,18 +20,33 @@ AD Script Assist supports multiple model providers, cloud and on-device neural T
   - If playback is triggered while audio description speech is still being generated, the app alerts you to wait a moment until generation finishes.
 - **Video Sources & Creative IDs (CIDs)**:
   - **YouTube**: Paste a YouTube video URL or enter its 11-character video ID.
-  - **Local Video**: Upload a local video file (up to 75MB, under 10 minutes).
+  - **Local Video**: Upload a local video file (up to 1.5GB, under 10 minutes).
 - **Export Mixed Video** (local videos): Downloads an MP4 with the original video stream copied unchanged and the original audio mixed with the AD track (AAC) using WebCodecs via [Mediabunny](https://mediabunny.dev).
 
 ---
 
-## 2. Getting Started
+## 2. System Architecture: Client Web App + Server-Side Key & Proxy Shim (`src/server.ts`)
+
+Originally, AD Script Assist ran 100% in the browser. It now uses a **client-heavy Lit web application paired with a lightweight Node.js server-side key & proxy shim ([`src/server.ts`](src/server.ts))**:
+
+- **Why Client + Server Shim?**:
+  1. **Google AI Studio Server-Side Policy**: Google AI Studio requires all Gemini API calls to execute on the server (`"majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]` in [`metadata.json`](metadata.json)).
+  2. **API Key Security**: Keeping API keys (`gemini_api_key`, `openai_api_key`) strictly on the server in `models.conf` (or server environment variables) ensures secrets are never embedded in client JavaScript bundles or exposed in browser DevTools network logs.
+- **How It Works**:
+  - **In the Browser (`src/web/`, `src/av/`, `src/core/`)**: Video playback, WebVTT script parsing/editing, IndexedDB project persistence, on-device Kokoro-82M WebGPU/WASM neural speech synthesis, and WebCodecs MP4 audio/video mixing all run in the browser.
+  - **On the Server ([`src/server.ts`](src/server.ts), mounted by [`vite.config.ts`](vite.config.ts))**: Reads [`models.conf`](models.conf.example) and exposes two lightweight routes:
+    1. `GET /api/config`: Serves the active `[providers]` and `[models]` configuration to the browser with all non-empty `[keys]` replaced by opaque placeholders (`__SERVER_KEY:<key_name>__`).
+    2. `POST /api/proxy`: Accepts outbound AI/TTS requests (up to 2 GB to support 1 GB+ local video blobs), validates the target hostname (`generativelanguage.googleapis.com` or `api.openai.com`), substitutes the real API key in server memory, and executes Gemini `generateContent` calls via the official `@google/genai` SDK (`User-Agent: aistudio-build`).
+
+---
+
+## 3. Getting Started
 
 You can run AD Script Assist directly in **Google AI Studio** (no local setup required) or **locally** on your machine.
 
 ### Option 1: Run in Google AI Studio (Recommended)
 
-AD Script Assist is structured as a standalone client-side web application that runs directly inside Google AI Studio's App Builder:
+AD Script Assist runs directly inside Google AI Studio's App Builder:
 
 1. **Generate an AI Studio zip archive** (excludes `node_modules/`, `dist/`, `.git/`, and local artifacts):
    ```bash
@@ -43,8 +58,7 @@ AD Script Assist is structured as a standalone client-side web application that 
    - When the project opens, **stop the agent** immediately so it does not overwrite files with boilerplate.
    - Attach `ad-script-assist-aistudio.zip` to the prompt and enter: `"import files"`.
 3. **API Keys in AI Studio**:
-   - In Google AI Studio, the host environment's default user `GEMINI_API_KEY` (or `API_KEY`) is detected automatically.
-   - Whenever a Gemini API key is provided by the environment, the **Settings** dialog locks the provider to Google Gemini and disables changing API keys or model names.
+   - In Google AI Studio, `src/server.ts` automatically detects the host environment's injected `GEMINI_API_KEY` (or `API_KEY`) on the server—no configuration file changes are required.
 
 ---
 
@@ -54,13 +68,53 @@ AD Script Assist is structured as a standalone client-side web application that 
 - **Node.js**: Version `20.19+` or `22.12+` (required by Vite 8).
 - **FFmpeg** (CLI only; the web app does not need it): Required on your native system only for the CLI's `--mix` flag with local videos and CLI frame extraction with OpenAI.
 
-#### Installation & Development Server
+#### Installation, Configuration (`models.conf`) & Development Server
 ```bash
-# Install dependencies
+# 1. Install dependencies and create models.conf from models.conf.example
 make setup
-# (or: npm install)
+```
 
-# Start the Vite development server at http://localhost:3000/
+Open `models.conf` in any text editor to configure your AI providers, model versions, and API keys:
+
+```ini
+[providers]
+# Active AI Vision / Q&A provider: gemini | openai
+ai_provider = gemini
+
+# Cloud Text-to-Speech provider when a cloud voice is selected in the UI:
+#   gemini | openai
+cloud_tts_provider = gemini
+
+[models]
+gemini_model = gemini-3.8-flash
+openai_model = gpt-4o
+gemini_tts_model = gemini-3.1-flash-tts-preview
+openai_tts_model = tts-1
+
+[keys]
+gemini_api_key = YOUR_GEMINI_API_KEY
+openai_api_key =
+```
+
+> **Note**: `models.conf` is git-ignored so your personal API keys are never committed (always edit `models.conf` rather than `models.conf.example`). User interface preferences—switching between **Cloud TTS** and **Kokoro (Local Browser TTS)**, selecting **Voice Language**, and customizing **Hotkeys**—remain configurable inside the in-app **Settings** dialog. Even without an API key, you can load a video, write or edit WebVTT cues in the **Script Editor**, and synthesize speech locally using Kokoro (`Heart (Kokoro Local)` or any other local voice).
+
+#### Changing AI & Cloud TTS Providers (`models.conf`)
+Because API keys and model selections are isolated on the server, switching between **Google Gemini** and **OpenAI** (or changing model IDs) is done in `models.conf`:
+
+1. **Switch the Vision / Q&A Provider (`ai_provider`)**:
+   - Set `ai_provider = gemini` (analyzes both YouTube URLs and local video files) or `ai_provider = openai` (analyzes local video files via extracted frames).
+   - Provide the matching API key under `[keys]` (`gemini_api_key = ...` or `openai_api_key = ...`).
+   - *(Optional)* Customize `gemini_model` (default `gemini-3.8-flash`) or `openai_model` (default `gpt-4o`) under `[models]`.
+2. **Switch the Cloud Text-to-Speech Provider (`cloud_tts_provider`)**:
+   - Set `cloud_tts_provider = gemini` (uses `gemini_tts_model`, default `gemini-3.1-flash-tts-preview`) or `cloud_tts_provider = openai` (uses `openai_tts_model`, default `tts-1`).
+   - You can mix and match providers (for example, `ai_provider = gemini` with `cloud_tts_provider = openai`, provided both keys are set under `[keys]`).
+   - Within the web UI, open **Settings** at any time to toggle **TTS Engine** between your configured **Cloud TTS** provider and **Kokoro (Local Browser TTS)**.
+3. **Applying Changes**:
+   - Save `models.conf` and refresh the browser page. `src/server.ts` re-reads `models.conf` on every request to `GET /api/config` and `POST /api/proxy`, so no server restart is needed.
+
+Start the Vite development server:
+```bash
+# 2. Start the Vite development server at http://localhost:5173/
 make dev
 # (or: npm start / npm run dev)
 ```
@@ -71,19 +125,16 @@ make serve
 # (or: npm run build && npm run preview)
 ```
 
-#### API Key Resolution
-- **Environment Key (Locked Demo / AI Studio Mode)**: If `GEMINI_API_KEY`, `API_KEY`, or `VITE_GEMINI_API_KEY` is defined in your environment or `.env` file when running Vite (or injected via `globalThis.process.env`), the app automatically uses that Gemini key and hides the API key, provider, and model fields in **Settings**.
-- **User-Configured Key**: If no environment Gemini key is set, click **Settings** in the top bar to enter a **Gemini API Key** or **OpenAI API Key**, choose a provider, or customize the Gemini agent and speech model names.
-- **No API Key (Local TTS Mode)**: Even without an API key, you can load a video, write or edit WebVTT cues in the **Script Editor**, and synthesize speech locally using Kokoro (`Heart (Kokoro Local)` or any other local voice).
-
 ---
 
-## 3. Code Layout
+## 4. Code Layout
 
 ```
-├── metadata.json           # Google AI Studio app metadata
+├── metadata.json           # Google AI Studio app metadata (MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API)
+├── models.conf.example     # Template for server-side [providers], [models], and [keys]
 ├── public/                 # Static assets
 ├── src/
+│   ├── server.ts           # Node/Vite server middleware (/api/config & /api/proxy)
 │   ├── ai/                 # AI Model & TTS Integrations
 │   │   ├── gemini_client.ts        # Gemini API request client & key resolution
 │   │   ├── openai_client.ts        # OpenAI ChatGPT request client
@@ -124,7 +175,7 @@ make serve
 │           ├── main_page.ts        # Root app layout page
 │           ├── top_bar.ts          # Header toolbar
 │           ├── add_video_modal.ts  # File drag-and-drop & URL input dialog
-│           ├── settings_modal.ts   # API Key, model, language & hotkey config panel
+│           ├── settings_modal.ts   # TTS mode, voice language & hotkey config panel
 │           ├── ad_text_area.ts     # Line-numbered WebVTT editor with per-cue speech status
 │           ├── agent_chat.ts       # Message history component
 │           ├── agent_input.ts      # Natural language chat textbox
@@ -145,9 +196,9 @@ make serve
 
 ---
 
-## 4. Data Management
+## 5. Data Management
 
-The application operates entirely **client-side**; there is no backend database server. Persistent user data is stored in the browser (`localStorage` and `IndexedDB`):
+Project state and audio caches operate **client-side** in the browser (`localStorage` and `IndexedDB`), while API keys and model configurations stay on the server (`models.conf` via `src/server.ts`):
 
 - **IndexedDB Stores**:
   - `adSegments`: Stores structured cues, start/end timestamps, and synthesized audio blobs.
@@ -160,7 +211,7 @@ The application operates entirely **client-side**; there is no backend database 
 
 ---
 
-## 5. Testing
+## 6. Testing
 
 All test suites run locally using the Node.js test runner.
 
@@ -186,7 +237,7 @@ npm run test:setup
 
 ---
 
-## 6. CLI Commands
+## 7. CLI Commands
 
 AD Script Assist includes a CLI tool for headlessly processing videos, generating AD scripts, answering video-related questions, and mixing audio tracks.
 

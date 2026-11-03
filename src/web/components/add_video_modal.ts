@@ -50,14 +50,29 @@ export class AddVideoModal extends LitElement {
     this.unsubscribes = [];
   }
 
+  private previouslyFocusedElement: HTMLElement | null = null;
+
+  private getDeepActiveElement(): HTMLElement | null {
+    let current: Element | null = document.activeElement;
+    while (current?.shadowRoot?.activeElement) {
+      current = current.shadowRoot.activeElement;
+    }
+    return current instanceof HTMLElement ? current : null;
+  }
+
   override updated(changedProperties: Map<string, any>) {
     if (changedProperties.has('isOpen')) {
       if (this.isOpen) {
         this.youtubeUrl = '';
         this.error = '';
+        this.previouslyFocusedElement = this.getDeepActiveElement();
         this.dialog?.showModal();
       } else {
-        this.dialog?.close();
+        if (this.dialog?.open) {
+          this.dialog.close();
+        }
+        this.previouslyFocusedElement?.focus();
+        this.previouslyFocusedElement = null;
       }
     }
   }
@@ -260,8 +275,8 @@ export class AddVideoModal extends LitElement {
       this.error = 'Please upload a valid video file.';
       return;
     }
-    if (file.size > 75 * 1024 * 1024) {
-      this.error = 'File size must be under 75MB.';
+    if (file.size > 1536 * 1024 * 1024) {
+      this.error = 'File size must be under 1.5GB.';
       return;
     }
 
@@ -414,15 +429,18 @@ export class AddVideoModal extends LitElement {
 
   render() {
     return html`
-      <dialog aria-labelledby="add-video-title" @cancel=${this.handleDialogCancel}>
+      <dialog
+        aria-labelledby="add-video-title"
+        aria-describedby="add-video-intro"
+        @cancel=${this.handleDialogCancel}>
         <div class="modal">
           <div class="header">
             <h2 id="add-video-title">Add Video</h2>
-            <button class="close-btn" aria-label="Close" title="Close" @click=${this.close}>&times;</button>
+            <button type="button" class="close-btn" aria-label="Close" title="Close" @click=${this.close}><span aria-hidden="true">&times;</span></button>
           </div>
           
           <div class="content">
-            <p class="modal-intro">
+            <p class="modal-intro" id="add-video-intro">
               Upload a local video file from your computer or import a YouTube video by URL.
             </p>
             <div class="drop-zone ${this.isDragging ? 'dragging' : ''}"
@@ -440,21 +458,24 @@ export class AddVideoModal extends LitElement {
                 @click=${() => this.shadowRoot?.querySelector<HTMLInputElement>('input[type="file"]')?.click()}>
                 Browse Local Files...
               </button>
-              <span>or drag &amp; drop a local video (Max 75MB, 10 min)</span>
+              <span>or drag &amp; drop a local video (Max 1.5GB, 10 min)</span>
               <input type="file" accept="video/*" style="display:none" aria-label="Upload local video file" @change=${this.handleFileInput}>
             </div>
             
-            <div class="divider">OR</div>
+            <div class="divider" role="separator" aria-label="or">OR</div>
             
             <label class="field-label" for="youtube-url-input">YouTube Video URL</label>
             <div class="youtube-input-container">
               <input id="youtube-url-input"
                      type="text" 
                      placeholder="https://www.youtube.com/watch?v=..." 
+                     aria-invalid=${this.error ? 'true' : 'false'}
+                     aria-describedby=${this.error ? 'add-video-error' : ''}
                      .value=${this.youtubeUrl}
                      @input=${this.handleYouTubeInput}
                      @keydown=${this.handleYouTubeKeyDown}>
-              <button class="primary" 
+              <button type="button"
+                      class="primary" 
                       id="add-youtube-btn"
                       ?disabled=${!this.youtubeUrl || this.isLoading} 
                       @click=${this.submitYouTube}>
@@ -463,7 +484,7 @@ export class AddVideoModal extends LitElement {
             </div>
             
             ${this.isLoading ? html`<div class="loading" role="status" aria-live="polite">Validating video...</div>` : ''}
-            ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : ''}
+            ${this.error ? html`<div id="add-video-error" class="error" role="alert">${this.error}</div>` : ''}
           </div>
         </div>
       </dialog>

@@ -72,7 +72,6 @@ export class AgentChat extends LitElement {
       align-self: flex-end;
       max-width: 80%;
       word-wrap: break-word;
-      white-space: pre-wrap;
     }
 
     .agent-message {
@@ -85,6 +84,10 @@ export class AgentChat extends LitElement {
       align-self: flex-start;
       max-width: 80%;
       word-wrap: break-word;
+    }
+
+    .user-message span,
+    .agent-message span {
       white-space: pre-wrap;
     }
 
@@ -161,8 +164,6 @@ export class AgentChat extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.setAttribute('role', 'region');
-    this.setAttribute('aria-label', 'Agent Chat Log');
 
     this.unsubscribes.push(
       appState.subscribe('conversationLog', (log) => {
@@ -204,6 +205,7 @@ export class AgentChat extends LitElement {
         class="chat-container"
         id="conversationHistory"
         role="log"
+        aria-label="Agent Chat Log"
         aria-live="polite"
         aria-relevant="additions">
         ${visibleEntries.length === 0 && !this.isResponding
@@ -230,7 +232,7 @@ export class AgentChat extends LitElement {
             return html`
               <li class="${className}">
                 ${prefix ? html`<h3 class="visually-hidden">${prefix}</h3>` : ''}
-                <span>${entry.message}</span>
+                <span>${entry.message.trim()}</span>
               </li>
             `;
           })}

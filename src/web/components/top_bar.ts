@@ -35,8 +35,18 @@ export class TopBar extends LitElement {
   private readonly controller = AppController.getInstance();
   private unsubscribes: Array<() => void> = [];
 
+  private readonly handleOutsideClick = (e: MouseEvent) => {
+    if (!this.showExportMenu) return;
+    const path = e.composedPath();
+    const dropdown = this.shadowRoot?.querySelector('.dropdown');
+    if (dropdown && !path.includes(dropdown)) {
+      this.showExportMenu = false;
+    }
+  };
+
   override connectedCallback() {
     super.connectedCallback();
+    document.addEventListener('click', this.handleOutsideClick);
     this.unsubscribes.push(
       appState.subscribe('localVideoFile', (file) => {
         this.isLocalVideo = !!file;
@@ -61,6 +71,7 @@ export class TopBar extends LitElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    document.removeEventListener('click', this.handleOutsideClick);
     for (const unsub of this.unsubscribes) {
       unsub();
     }
@@ -101,6 +112,10 @@ export class TopBar extends LitElement {
       trigger?.focus();
       return;
     }
+    if (e.key === 'Tab') {
+      this.showExportMenu = false;
+      return;
+    }
     if (items.length === 0) return;
     const currentIndex = items.indexOf(
       (this.shadowRoot?.activeElement as HTMLButtonElement) || items[0],
@@ -113,6 +128,12 @@ export class TopBar extends LitElement {
       e.preventDefault();
       const prev = items[(currentIndex - 1 + items.length) % items.length];
       prev?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1]?.focus();
     }
   }
 
@@ -290,15 +311,15 @@ export class TopBar extends LitElement {
           <span class="material-icons logo-icon" aria-hidden="true">movie_edit</span>
           <h1>AD Script Assist</h1>
           <span
-            class="material-icons info-icon"
+            class="info-icon"
             role="img"
             aria-label="About AD Script Assist: Create, edit, and synthesize Audio Description scripts for videos."
             title="Create, edit, and synthesize Audio Description scripts for videos."
-          >info_outline</span>
+          ><span class="material-icons" aria-hidden="true">info_outline</span></span>
         </div>
         
         <div class="action-group">
-          <button @click=${() => this.controller.openAddVideo()} aria-label="Add Video">
+          <button @click=${() => this.controller.openAddVideo()} aria-label="Add Video" aria-haspopup="dialog">
             <span class="material-icons" aria-hidden="true">video_call</span>
             Add Video
           </button>
@@ -369,12 +390,12 @@ export class TopBar extends LitElement {
             ` : ''}
           </div>
           
-          <button @click=${() => this.controller.openSettings()} aria-label="Settings">
+          <button @click=${() => this.controller.openSettings()} aria-label="Settings" aria-haspopup="dialog">
             <span class="material-icons" aria-hidden="true">settings</span>
             Settings
           </button>
           
-          <button @click=${() => this.controller.openHelp()} aria-label="Help">
+          <button @click=${() => this.controller.openHelp()} aria-label="Help" aria-haspopup="dialog">
             <span class="material-icons" aria-hidden="true">help_outline</span>
             Help
           </button>

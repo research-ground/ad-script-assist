@@ -20,7 +20,15 @@
  */
 
 import {AdSegment, VideoPlayerApi, ConversationEntry} from './types';
-import {getInjectedGeminiApiKey} from './constants';
+import {
+  DEFAULT_AGENT_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENAI_TTS_MODEL,
+  DEFAULT_SPEECH_MODEL,
+  getDefaultVoiceForTtsProvider,
+  getInjectedGeminiApiKey,
+  getVoicesForTtsProvider,
+} from './constants';
 
 /** Supported application states. */
 export interface AppState {
@@ -36,7 +44,7 @@ export interface AppState {
   videoDuration: number;
   compiledAdTrackUrl: string | null;
   conversationLog: ConversationEntry[];
-  
+
   // Modal visibility states
   isSettingsModalOpen: boolean;
   isHelpModalOpen: boolean;
@@ -52,17 +60,20 @@ export interface AppState {
   // Editor State
   editorScriptText: string;
   editorCursorLine: number;
-  
-  // User Settings (Saved globally)
+
+  // Server-configured Provider, Model & Key State (from models.conf via GET /api/config)
   geminiApiKey: string;
   openaiApiKey: string;
   llmProvider: 'gemini' | 'openai' | 'none';
+  cloudTtsProvider: 'gemini' | 'openai';
   ttsProvider: 'gemini' | 'openai' | 'kokoro';
   ttsApiKey: string;
   ttsLanguage: string;
   agentModel: string; // '' = DEFAULT_AGENT_MODEL
+  openaiModel: string; // '' = DEFAULT_OPENAI_MODEL
   speechModel: string; // '' = DEFAULT_SPEECH_MODEL
-  
+  openaiTtsModel: string; // '' = DEFAULT_OPENAI_TTS_MODEL
+
   // Project Settings (Saved per-video)
   ttsVoice: string;
   speakAdText: boolean;
@@ -75,16 +86,7 @@ export interface AppState {
 
 type StateListener<T> = (value: T) => void;
 
-const USER_SETTINGS_KEYS = [
-  'geminiApiKey',
-  'openaiApiKey',
-  'llmProvider',
-  'ttsProvider',
-  'ttsApiKey',
-  'ttsLanguage',
-  'agentModel',
-  'speechModel',
-] as const;
+const USER_SETTINGS_KEYS = ['ttsProvider', 'ttsLanguage'] as const;
 const PROJECT_SETTINGS_KEYS = [
   'currentVideoId',
   'ttsVoice',
@@ -93,6 +95,38 @@ const PROJECT_SETTINGS_KEYS = [
   'videoSource',
   'scriptNotes',
 ] as const;
+
+function parseIniText(text: string): Record<string, Record<string, string>> {
+  const sections: Record<string, Record<string, string>> = {};
+  let currentSection = '';
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+    if (line.startsWith('[') && line.endsWith(']')) {
+      currentSection = line.slice(1, -1).trim().toLowerCase();
+      if (!sections[currentSection]) sections[currentSection] = {};
+      continue;
+    }
+    const eqIdx = line.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = line.slice(0, eqIdx).trim().toLowerCase();
+    let val = line.slice(eqIdx + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    } else {
+      const hashIdx = val.indexOf(' #');
+      if (hashIdx !== -1) {
+        val = val.slice(0, hashIdx).trim();
+      }
+    }
+    if (!sections[currentSection]) sections[currentSection] = {};
+    sections[currentSection][key] = val;
+  }
+  return sections;
+}
 
 /**
  * Manages shared application state and automatically syncs subset of keys to localStorage.
@@ -109,7 +143,7 @@ class AppStateManager {
     isAgentResponding: false,
     statusMessage: '',
     conversationLog: [],
-    
+
     isSettingsModalOpen: false,
     isHelpModalOpen: false,
     isAddVideoModalOpen: false,
@@ -126,12 +160,15 @@ class AppStateManager {
     geminiApiKey: '',
     openaiApiKey: '',
     llmProvider: 'gemini',
+    cloudTtsProvider: 'gemini',
     ttsProvider: 'gemini',
     ttsApiKey: '',
     ttsLanguage: 'en-US',
-    agentModel: '',
-    speechModel: '',
-    
+    agentModel: DEFAULT_AGENT_MODEL,
+    openaiModel: DEFAULT_OPENAI_MODEL,
+    speechModel: DEFAULT_SPEECH_MODEL,
+    openaiTtsModel: DEFAULT_OPENAI_TTS_MODEL,
+
     ttsVoice: 'Aoede',
     speakAdText: true,
     videoType: 'youtube',
@@ -144,38 +181,128 @@ class AppStateManager {
   } = {};
 
   constructor() {
-    // Load User Settings from localStorage immediately
-    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
-      const hasInjectedKey = Boolean(getInjectedGeminiApiKey());
-      const storedVlmKey =
-        localStorage.getItem('userSettings_geminiApiKey') ||
-        localStorage.getItem('userSettings_openaiApiKey') ||
-        '';
-      this.state.geminiApiKey = storedVlmKey;
-      this.state.openaiApiKey = storedVlmKey;
-      this.state.llmProvider =
-        (localStorage.getItem('userSettings_llmProvider') as 'gemini' | 'openai' | 'none') ||
-        'gemini';
-      if (hasInjectedKey) this.state.llmProvider = 'gemini'; // Injected key / AI Studio: locked to Gemini.
-      this.state.ttsProvider =
-        (localStorage.getItem('userSettings_ttsProvider') as 'gemini' | 'openai' | 'kokoro') ||
-        'gemini';
-      this.state.ttsApiKey = localStorage.getItem('userSettings_ttsApiKey') || '';
-      this.state.ttsLanguage = localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
-      if (!hasInjectedKey) { // Injected key / AI Studio: always the default models.
-        this.state.agentModel = localStorage.getItem('userSettings_agentModel') || '';
-        this.state.speechModel = localStorage.getItem('userSettings_speechModel') || '';
+    // Load User Settings from localStorage immediately (only non-secret UI preferences)
+    if (
+      typeof localStorage !== 'undefined' &&
+      typeof localStorage.getItem === 'function'
+    ) {
+      const injectedKey = getInjectedGeminiApiKey();
+      if (injectedKey) {
+        this.state.geminiApiKey = injectedKey;
+        this.state.llmProvider = 'gemini';
       }
-      
+      const savedTtsProvider = localStorage.getItem(
+        'userSettings_ttsProvider',
+      ) as 'gemini' | 'openai' | 'kokoro' | null;
+      if (savedTtsProvider === 'kokoro') {
+        this.state.ttsProvider = 'kokoro';
+      }
+      this.state.ttsLanguage =
+        localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
+
       // Load active project settings immediately
       const raw = localStorage.getItem('projectSettings_active');
       if (raw) {
-        const projectSettings = JSON.parse(raw);
-        for (const pKey of PROJECT_SETTINGS_KEYS) {
-          if (projectSettings[pKey] !== undefined) {
-            (this.state as any)[pKey] = projectSettings[pKey];
+        try {
+          const projectSettings = JSON.parse(raw);
+          for (const pKey of PROJECT_SETTINGS_KEYS) {
+            if (projectSettings[pKey] !== undefined) {
+              (this.state as any)[pKey] = projectSettings[pKey];
+            }
           }
+        } catch {
+          // Ignore malformed JSON in localStorage
         }
+      }
+    }
+
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      void this.loadServerConfig();
+    }
+  }
+
+  private serverConfigPromise: Promise<void> | null = null;
+
+  /**
+   * Loads server-side provider, model, and key-placeholder configuration from
+   * `GET /api/config` (`models.conf`).
+   */
+  loadServerConfig(): Promise<void> {
+    if (!this.serverConfigPromise) {
+      this.serverConfigPromise = this.fetchServerConfig().finally(() => {
+        this.serverConfigPromise = null;
+      });
+    }
+    return this.serverConfigPromise;
+  }
+
+  private async fetchServerConfig(): Promise<void> {
+    try {
+      const res = await fetch('/api/config', { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        if (
+          text.includes('[providers]') ||
+          text.includes('[models]') ||
+          text.includes('[keys]')
+        ) {
+          this.applyServerConfText(text);
+        }
+      }
+    } catch {
+      // Fallback to defaults if running without the server shim
+    }
+  }
+
+  /**
+   * Applies INI configuration text (`[providers]`, `[models]`, `[keys]`) to state.
+   */
+  applyServerConfText(text: string): void {
+    const sections = parseIniText(text);
+    const providers = sections['providers'] || {};
+    const models = sections['models'] || {};
+    const keys = sections['keys'] || {};
+
+    const aiProv = (providers['ai_provider'] || 'gemini').toLowerCase();
+    const llmProvider: 'gemini' | 'openai' | 'none' =
+      aiProv === 'openai' ? 'openai' : aiProv === 'none' ? 'none' : 'gemini';
+    this.set('llmProvider', llmProvider);
+
+    const cloudTtsProv = (
+      providers['cloud_tts_provider'] || 'gemini'
+    ).toLowerCase();
+    const cloudTtsProvider: 'gemini' | 'openai' =
+      cloudTtsProv === 'openai' ? 'openai' : 'gemini';
+    this.set('cloudTtsProvider', cloudTtsProvider);
+
+    if (models['gemini_model']) {
+      this.set('agentModel', models['gemini_model']);
+    }
+    if (models['openai_model']) {
+      this.set('openaiModel', models['openai_model']);
+    }
+    if (models['gemini_tts_model']) {
+      this.set('speechModel', models['gemini_tts_model']);
+    }
+    if (models['openai_tts_model']) {
+      this.set('openaiTtsModel', models['openai_tts_model']);
+    }
+
+    const geminiKey = keys['gemini_api_key'] || getInjectedGeminiApiKey() || '';
+    const openaiKey = keys['openai_api_key'] || '';
+    this.set('geminiApiKey', geminiKey);
+    this.set('openaiApiKey', openaiKey);
+
+    const activeCloudTtsKey =
+      cloudTtsProvider === 'openai' ? openaiKey : geminiKey;
+    this.set('ttsApiKey', activeCloudTtsKey);
+
+    // If user hasn't explicitly chosen local Kokoro TTS, align ttsProvider with cloudTtsProvider
+    if (this.state.ttsProvider !== 'kokoro') {
+      this.set('ttsProvider', cloudTtsProvider);
+      const validVoices = getVoicesForTtsProvider(cloudTtsProvider);
+      if (!validVoices.some((v) => v.name === this.state.ttsVoice)) {
+        this.set('ttsVoice', getDefaultVoiceForTtsProvider(cloudTtsProvider));
       }
     }
   }
@@ -192,35 +319,32 @@ class AppStateManager {
     this.state[key] = value;
     this.notify(key, value);
 
-    // Keep the single VLM API key synchronized across geminiApiKey and openaiApiKey.
-    if (key === 'geminiApiKey' && typeof value === 'string') {
-      this.state.openaiApiKey = value;
-      this.notify('openaiApiKey', value);
-      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
-        localStorage.setItem('userSettings_openaiApiKey', value);
-      }
-    } else if (key === 'openaiApiKey' && typeof value === 'string') {
-      this.state.geminiApiKey = value;
-      this.notify('geminiApiKey', value);
-      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
-        localStorage.setItem('userSettings_geminiApiKey', value);
-      }
-    }
-
     // Auto-save User Settings
     if ((USER_SETTINGS_KEYS as readonly string[]).includes(key as string)) {
-      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
-        localStorage.setItem(`userSettings_${String(key)}`, typeof value === 'string' ? value : JSON.stringify(value));
+      if (
+        typeof localStorage !== 'undefined' &&
+        typeof localStorage.setItem === 'function'
+      ) {
+        localStorage.setItem(
+          `userSettings_${String(key)}`,
+          typeof value === 'string' ? value : JSON.stringify(value),
+        );
       }
     }
 
     // Auto-save Project Settings
     if ((PROJECT_SETTINGS_KEYS as readonly string[]).includes(key as string)) {
-      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+      if (
+        typeof localStorage !== 'undefined' &&
+        typeof localStorage.setItem === 'function'
+      ) {
         const raw = localStorage.getItem('projectSettings_active');
         const projectSettings = raw ? JSON.parse(raw) : {};
         projectSettings[key as string] = value;
-        localStorage.setItem('projectSettings_active', JSON.stringify(projectSettings));
+        localStorage.setItem(
+          'projectSettings_active',
+          JSON.stringify(projectSettings),
+        );
       }
     }
   }
@@ -256,7 +380,7 @@ class AppStateManager {
       if (currentListeners) {
         this.listeners[key] = (
           currentListeners as Array<StateListener<AppState[K]>>
-        ).filter((l) => l !== listener) as Array<StateListener<AppState[K]>>;
+        ).filter((l) => l !== listener);
       }
     };
   }

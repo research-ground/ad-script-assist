@@ -186,45 +186,49 @@ export class VideoControls extends LitElement {
       <div class="controls-container">
         <button
           id="restartButton"
+          type="button"
           @click=${() => {
             this.dispatch('restart');
           }}
           ?disabled=${!this.isVideoLoaded}
           aria-label="Go to beginning of video"
           title="Go to beginning of video (0:00)">
-          <span class="material-icons">skip_previous</span>
+          <span class="material-icons" aria-hidden="true">skip_previous</span>
         </button>
         <button
           id="rewindButton"
+          type="button"
           @click=${() => {
             this.dispatch('rewind');
           }}
           ?disabled=${!this.isVideoLoaded}
           aria-label="Rewind video 5 seconds"
           title="Rewind video 5 seconds">
-          <span class="material-icons">fast_rewind</span>
+          <span class="material-icons" aria-hidden="true">fast_rewind</span>
         </button>
         <button
           id="playButton"
+          type="button"
           @click=${() => {
             this.dispatch('play-pause');
           }}
           ?disabled=${!this.isVideoLoaded}
           aria-label="Play or pause video"
           title="Play or pause video">
-          <span class="material-icons"
+          <span class="material-icons" aria-hidden="true"
             >${this.isPlaying ? 'pause' : 'play_arrow'}</span
           >
         </button>
         <button
           id="forwardButton"
+          type="button"
           @click=${() => {
             this.dispatch('forward');
           }}
           ?disabled=${!this.isVideoLoaded}
           aria-label="Forward video 5 seconds"
           title="Forward video 5 seconds">
-          <span class="material-icons">fast_forward</span>
+          <span class="material-icons" aria-hidden="true">fast_forward</span>
         </button>
 
 

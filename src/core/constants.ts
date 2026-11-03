@@ -37,6 +37,66 @@ export const DEFAULT_TTS_MODEL = undefined;
 export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_8_FLASH;
 /** The default Gemini model for AD speech (used when the provider is Gemini). */
 export const DEFAULT_SPEECH_MODEL = ModelName.GEMINI_3_1_FLASH_TTS;
+/** The default OpenAI model to use for the agent chat. */
+export const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+/** The default OpenAI model for AD speech (used when the cloud TTS provider is OpenAI). */
+export const DEFAULT_OPENAI_TTS_MODEL = 'tts-1';
+
+export const SERVER_KEY_PREFIX = '__SERVER_KEY:';
+export const SERVER_KEY_ENV_PREFIX = '__SERVER_KEY_ENV:';
+
+/**
+ * Returns true if the value is a server-side key placeholder served by `GET /api/config`.
+ */
+export function isServerKeyPlaceholder(value?: string | null): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith(SERVER_KEY_PREFIX) ||
+    trimmed.startsWith(SERVER_KEY_ENV_PREFIX)
+  );
+}
+
+/**
+ * Routes an outbound HTTP request through the server-side `/api/proxy` endpoint
+ * when running in the browser so API keys remain strictly on the server.
+ */
+export async function proxiedFetch(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
+  if (typeof window === 'undefined') {
+    return fetch(url, init);
+  }
+
+  const headersObj: Record<string, string> = {};
+  if (init?.headers) {
+    if (init.headers instanceof Headers) {
+      init.headers.forEach((v, k) => {
+        headersObj[k] = v;
+      });
+    } else if (Array.isArray(init.headers)) {
+      for (const [k, v] of init.headers) {
+        headersObj[k] = v;
+      }
+    } else {
+      Object.assign(headersObj, init.headers as Record<string, string>);
+    }
+  }
+
+  const bodyStr = typeof init?.body === 'string' ? init.body : undefined;
+  return fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url,
+      method: init?.method || 'GET',
+      headers: headersObj,
+      body: bodyStr,
+    }),
+    signal: init?.signal,
+  });
+}
 
 /** Default local Kokoro voice used when a local voice is selected or when cloud TTS falls back. */
 export const DEFAULT_KOKORO_VOICE = 'af_heart';

@@ -15,7 +15,12 @@
  */
 
 import {GenerateContentResponse, GoogleGenAI, Part} from '@google/genai';
-import {DEFAULT_AGENT_MODEL, getInjectedGeminiApiKey} from '../core/constants';
+import {
+  DEFAULT_AGENT_MODEL,
+  getInjectedGeminiApiKey,
+  isServerKeyPlaceholder,
+  proxiedFetch,
+} from '../core/constants';
 import {GeminiRequestPlusData} from '../core/types';
 import {appState} from '../core/app_state';
 import {validateApiKeyForProvider} from './describe_error';
@@ -62,6 +67,48 @@ export async function getAI(apiKeyOverride?: string): Promise<GoogleGenAI> {
   }
 
   return aiInstance;
+}
+
+/**
+ * Executes a Gemini `generateContent` request through `/api/proxy` in the browser
+ * (where `src/server.ts` executes `@google/genai` on the server with the real key)
+ * or directly via `@google/genai` in Node CLI mode.
+ */
+export async function callGeminiGenerateContent(
+  apiKey: string,
+  params: {
+    model: string;
+    contents: unknown;
+    config?: Record<string, unknown>;
+  },
+  signal?: AbortSignal,
+): Promise<GenerateContentResponse> {
+  if (typeof window !== 'undefined' || isServerKeyPlaceholder(apiKey)) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await proxiedFetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: params.contents,
+        config: params.config,
+      }),
+      signal,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(
+        errText || `Gemini API request failed (${res.status}): ${res.statusText}`,
+      );
+    }
+    return (await res.json()) as GenerateContentResponse;
+  }
+
+  const ai = await getAI(apiKey);
+  return ai.models.generateContent({
+    model: params.model,
+    contents: params.contents as never,
+    config: params.config as never,
+  });
 }
 
 // Track request lifecycle to prevent reuse
@@ -115,18 +162,18 @@ class GeminiRequest {
     try {
       const resolvedKey = resolveGeminiApiKey();
       if (!resolvedKey.trim()) {
-        throw new Error('No Gemini API key configured. Open Settings to add one.');
+        throw new Error('No Gemini API key configured. Please add gemini_api_key in models.conf.');
       }
       const keyMismatch = validateApiKeyForProvider(resolvedKey, 'gemini', 'VLM');
       if (keyMismatch) {
         throw new Error(keyMismatch);
       }
-      const ai = await getAI(resolvedKey);
       // We explicitly do NOT enforce JSON schema or use responseMimeType: 'application/json'
       // because it can sometimes cause the model to perform poorly, hallucinate, or fail
       // on complex multimodal inputs. Instead, we use a robust client-side parser
       // (parseGeminiJsonResponse) to extract JSON from the raw text response.
-      const response: GenerateContentResponse = await ai.models.generateContent(
+      const response: GenerateContentResponse = await callGeminiGenerateContent(
+        resolvedKey,
         {
           model: modelName,
           contents: [{role: 'user', parts}],
@@ -134,6 +181,7 @@ class GeminiRequest {
             maxOutputTokens: 16384,
           },
         },
+        this.abortController.signal,
       );
 
       this.duration = (performance.now() - this.startTime) / 1000;
@@ -235,12 +283,16 @@ class GeminiRequest {
   ) {
     const arrayBuffer = await videoBlob.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);
-    const CHUNK_SIZE = 0x8000;
-    let binary = '';
+    // Use a chunk size divisible by 3 (30,720 bytes = 3 * 10,240) so each chunk
+    // can be base64-encoded independently without intermediate '=' padding or
+    // allocating a single giant binary string for 1 GB+ video blobs.
+    const CHUNK_SIZE = 30720;
+    const base64Chunks: string[] = [];
     for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
-      binary += String.fromCharCode.apply(null, uint8.subarray(i, i + CHUNK_SIZE) as any);
+      const sub = uint8.subarray(i, i + CHUNK_SIZE);
+      base64Chunks.push(btoa(String.fromCharCode.apply(null, sub as any)));
     }
-    const base64 = btoa(binary);
+    const base64 = base64Chunks.join('');
 
     const parts: Part[] = [
       {text: prompt},
