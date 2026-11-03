@@ -86,7 +86,10 @@ export async function callGeminiGenerateContent(
   },
   signal?: AbortSignal,
 ): Promise<GenerateContentResponse> {
-  if (typeof window !== 'undefined' || isServerKeyPlaceholder(apiKey)) {
+  if (
+    isServerKeyPlaceholder(apiKey) ||
+    (typeof window !== 'undefined' && appState.get('hasServerProxy'))
+  ) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const res = await proxiedFetch(endpoint, {
       method: 'POST',
@@ -131,7 +134,7 @@ async function uploadLocalVideoInChunks(
   signal?: AbortSignal,
   forceReupload = false,
 ): Promise<string | null> {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !appState.get('hasServerProxy')) {
     return null;
   }
   if (!forceReupload) {

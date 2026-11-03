@@ -28,6 +28,7 @@ import {
   DEFAULT_SPEECH_MODEL,
   getDefaultVoiceForTtsProvider,
   getInjectedGeminiApiKey,
+  getStaticFallbackGeminiKey,
   getVoicesForTtsProvider,
 } from './constants';
 
@@ -63,6 +64,7 @@ export interface AppState {
   editorCursorLine: number;
 
   // Server-configured Provider, Model & Key State (from models.conf via GET /api/config)
+  hasServerProxy: boolean;
   geminiApiKey: string;
   openaiApiKey: string;
   llmProvider: 'gemini' | 'openai' | 'none';
@@ -158,6 +160,7 @@ class AppStateManager {
     editorScriptText: '',
     editorCursorLine: 1,
 
+    hasServerProxy: false,
     geminiApiKey: '',
     openaiApiKey: '',
     llmProvider: 'gemini',
@@ -251,11 +254,20 @@ class AppStateManager {
           text.includes('[models]') ||
           text.includes('[keys]')
         ) {
+          this.set('hasServerProxy', true);
           this.applyServerConfText(text);
+          return;
         }
       }
     } catch {
-      // Fallback to defaults if running without the server shim
+      // Fallback to static build key if running without the server shim
+    }
+
+    this.set('hasServerProxy', false);
+    const fallbackKey = getStaticFallbackGeminiKey();
+    if (fallbackKey && !this.state.geminiApiKey) {
+      this.set('geminiApiKey', fallbackKey);
+      this.set('ttsApiKey', fallbackKey);
     }
   }
 

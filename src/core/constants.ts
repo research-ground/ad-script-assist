@@ -71,18 +71,31 @@ export async function proxiedFetch(
   }
 
   const headersObj: Record<string, string> = {};
+  let hasServerKey = isServerKeyPlaceholder(url);
   if (init?.headers) {
     if (init.headers instanceof Headers) {
       init.headers.forEach((v, k) => {
         headersObj[k] = v;
+        if (isServerKeyPlaceholder(v)) hasServerKey = true;
       });
     } else if (Array.isArray(init.headers)) {
       for (const [k, v] of init.headers) {
         headersObj[k] = v;
+        if (isServerKeyPlaceholder(v)) hasServerKey = true;
       }
     } else {
-      Object.assign(headersObj, init.headers as Record<string, string>);
+      for (const [k, v] of Object.entries(init.headers as Record<string, string>)) {
+        headersObj[k] = v;
+        if (isServerKeyPlaceholder(v)) hasServerKey = true;
+      }
     }
+  }
+
+  const hasServerProxy = Boolean(
+    (globalThis as { appState?: { get?: (k: string) => unknown } }).appState?.get?.('hasServerProxy'),
+  );
+  if (!hasServerKey && !hasServerProxy) {
+    return fetch(url, init);
   }
 
   const bodyStr = typeof init?.body === 'string' ? init.body : undefined;
@@ -260,6 +273,26 @@ export function getInjectedGeminiApiKey(): string {
     return fromVite;
   }
   return readInjectedEnv('GEMINI_API_KEY') || readInjectedEnv('API_KEY');
+}
+
+/**
+ * Reads any build-time or static-host injected Gemini API key when `/api/config`
+ * is not present (e.g., static `vite build` exports).
+ */
+export function getStaticFallbackGeminiKey(): string {
+  const fromBuild = getInjectedGeminiApiKey();
+  if (fromBuild && fromBuild !== 'PLACEHOLDER_API_KEY') {
+    return fromBuild;
+  }
+  const g = globalThis as Record<string, unknown>;
+  const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
+  for (const name of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'API_KEY']) {
+    const val = proc?.env?.[name];
+    if (typeof val === 'string' && val.trim() !== '' && val.trim() !== 'PLACEHOLDER_API_KEY') {
+      return val.trim();
+    }
+  }
+  return '';
 }
 
 /**

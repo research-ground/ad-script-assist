@@ -14,15 +14,33 @@
  limitations under the License.
  */
 
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { createApiMiddleware } from './src/server';
 
-export default defineConfig(({ isSsrBuild }) => {
+export default defineConfig(({ command, mode }) => {
   const apiMiddleware = createApiMiddleware(process.cwd());
+  const env = command === 'build' ? loadEnv(mode, process.cwd(), '') : {};
+  const buildInjectedGeminiKey =
+    command === 'build'
+      ? (
+          env.VITE_GEMINI_API_KEY ||
+          env.GEMINI_API_KEY ||
+          env.GOOGLE_API_KEY ||
+          env.API_KEY ||
+          process.env.VITE_GEMINI_API_KEY ||
+          process.env.GEMINI_API_KEY ||
+          process.env.GOOGLE_API_KEY ||
+          process.env.API_KEY ||
+          ''
+        ).trim()
+      : '';
 
   return {
     root: '.',
     base: './',
+    define: {
+      __AD_SCRIPT_ASSIST_GEMINI_API_KEY__: JSON.stringify(buildInjectedGeminiKey),
+    },
     server: {
       allowedHosts: true,
     },
@@ -35,21 +53,10 @@ export default defineConfig(({ isSsrBuild }) => {
     optimizeDeps: {
       exclude: ['kokoro-js', '@huggingface/transformers', 'onnxruntime-web'],
     },
-    build: isSsrBuild
-      ? {
-          outDir: 'dist/server',
-          emptyOutDir: false,
-          rollupOptions: {
-            output: {
-              format: 'es',
-              entryFileNames: 'server.mjs',
-            },
-          },
-        }
-      : {
-          outDir: 'dist',
-          emptyOutDir: true,
-        },
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+    },
     plugins: [
       {
         name: 'ad-script-assist-server-api',
