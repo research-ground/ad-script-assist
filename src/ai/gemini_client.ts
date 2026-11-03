@@ -38,10 +38,6 @@ if (typeof window !== 'undefined') {
 }
 
 export function resolveGeminiApiKey(): string {
-  const injectedKey = getInjectedGeminiApiKey();
-  if (injectedKey) {
-    return injectedKey;
-  }
   if (typeof window !== 'undefined') {
     const urlParams = new URLSearchParams(window.location.search);
     const urlKey = urlParams.get('api_key') || urlParams.get('key');
@@ -49,7 +45,14 @@ export function resolveGeminiApiKey(): string {
       appState.set('geminiApiKey', urlKey);
       return urlKey;
     }
-    return appState.get('geminiApiKey') || '';
+    const stateKey = appState.get('geminiApiKey');
+    if (stateKey) {
+      return stateKey;
+    }
+  }
+  const injectedKey = getInjectedGeminiApiKey();
+  if (injectedKey) {
+    return injectedKey;
   }
   if (typeof process !== 'undefined' && process.env) {
     return process.env.GEMINI_API_KEY || process.env.API_KEY || '';

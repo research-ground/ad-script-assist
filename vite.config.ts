@@ -23,6 +23,12 @@ export default defineConfig(() => {
   return {
     root: '.',
     base: './',
+    server: {
+      allowedHosts: true,
+    },
+    preview: {
+      allowedHosts: true,
+    },
     worker: {
       format: 'es',
     },

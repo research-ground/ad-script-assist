@@ -230,14 +230,16 @@ export const GEMINI_WAITING_MESSAGES = [
  */
 function readInjectedEnv(key: string): string {
   const g = globalThis as Record<string, unknown>;
-  const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
-  const fromProc = proc?.env?.[key];
-  if (typeof fromProc === 'string' && fromProc.trim() !== '') {
-    return fromProc.trim();
-  }
   const winVal = g[`__AD_SCRIPT_ASSIST_${key}__`];
   if (typeof winVal === 'string' && winVal.trim() !== '') {
     return winVal.trim();
+  }
+  if (typeof window === 'undefined') {
+    const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
+    const fromProc = proc?.env?.[key];
+    if (typeof fromProc === 'string' && fromProc.trim() !== '') {
+      return fromProc.trim();
+    }
   }
   return '';
 }

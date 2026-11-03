@@ -335,9 +335,11 @@ export function createApiMiddleware(rootDir = process.cwd()) {
         try {
           const modelName = decodeURIComponent(geminiMatch[1]);
           const apiKey =
+            realKeys['gemini_api_key'] ||
+            process.env['GEMINI_API_KEY'] ||
+            process.env['API_KEY'] ||
             parsedTarget.searchParams.get('key') ||
             resolvedHeaders['x-goog-api-key'] ||
-            realKeys['gemini_api_key'] ||
             '';
           const parsedJson = JSON.parse(resolvedBody) as {
             contents?: unknown;
