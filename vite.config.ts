@@ -17,7 +17,7 @@
 import { defineConfig } from 'vite';
 import { createApiMiddleware } from './src/server';
 
-export default defineConfig(() => {
+export default defineConfig(({ isSsrBuild }) => {
   const apiMiddleware = createApiMiddleware(process.cwd());
 
   return {
@@ -35,10 +35,21 @@ export default defineConfig(() => {
     optimizeDeps: {
       exclude: ['kokoro-js', '@huggingface/transformers', 'onnxruntime-web'],
     },
-    build: {
-      outDir: 'dist',
-      emptyOutDir: true,
-    },
+    build: isSsrBuild
+      ? {
+          outDir: 'dist/server',
+          emptyOutDir: false,
+          rollupOptions: {
+            output: {
+              format: 'es',
+              entryFileNames: 'server.mjs',
+            },
+          },
+        }
+      : {
+          outDir: 'dist',
+          emptyOutDir: true,
+        },
     plugins: [
       {
         name: 'ad-script-assist-server-api',

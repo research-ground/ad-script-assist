@@ -250,7 +250,7 @@ export class AgentInput extends LitElement {
               <span class="material-icons warning-icon" aria-hidden="true">warning</span>
               <span
                 >Gemini API Key is missing. Please configure it in
-                Settings.</span
+                models.conf.</span
               >
             </div>
           `

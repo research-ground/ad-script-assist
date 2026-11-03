@@ -66,7 +66,11 @@ export class OpenAIRequest {
     }
 
     try {
-      const apiKey = getOpenAIApiKey().trim();
+      let apiKey = getOpenAIApiKey().trim();
+      if (!apiKey && typeof window !== 'undefined') {
+        await appState.loadServerConfig();
+        apiKey = getOpenAIApiKey().trim();
+      }
       if (!apiKey) {
         throw new Error('No OpenAI API key configured. Please add openai_api_key in models.conf.');
       }

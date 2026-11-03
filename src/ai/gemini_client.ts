@@ -226,7 +226,11 @@ class GeminiRequest {
 
 
     try {
-      const resolvedKey = resolveGeminiApiKey();
+      let resolvedKey = resolveGeminiApiKey();
+      if (!resolvedKey.trim() && typeof window !== 'undefined') {
+        await appState.loadServerConfig();
+        resolvedKey = resolveGeminiApiKey();
+      }
       if (!resolvedKey.trim()) {
         throw new Error('No Gemini API key configured. Please add gemini_api_key in models.conf.');
       }

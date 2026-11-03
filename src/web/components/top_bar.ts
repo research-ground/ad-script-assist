@@ -333,7 +333,7 @@ export class TopBar extends LitElement {
             title=${!this.isPlayEnabled
               ? 'Load a video first to generate an Audio Description script'
               : !this.isGenerateEnabled
-                ? 'Configure a VLM provider and API key in Settings to generate an Audio Description script'
+                ? 'Configure a VLM provider and API key in models.conf to generate an Audio Description script'
                 : 'Generate an Audio Description script with AI'}
           >
             <span class="material-icons" aria-hidden="true">auto_awesome</span>

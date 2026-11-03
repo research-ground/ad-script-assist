@@ -6,15 +6,16 @@
   "dependencies": {
     "@google/genai": "^2.8.0",
     "dotenv": "^17.4.2",
+    "express": "^5.1.0",
     "kokoro-js": "^1.2.1",
     "lit": "^3.3.3",
     "mediabunny": "1.57.0",
     "openai": "^6.44.0"
   },
   "scripts": {
-    "start": "vite",
+    "start": "node server.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --ssr src/server.ts --outDir dist/server --emptyOutDir false",
     "preview": "vite preview",
     "test:setup": "tsx tests/setup_tests.ts",
     "pretest:cli": "tsx tests/setup_tests.ts",
@@ -28,6 +29,7 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.3",
     "@types/node": "^25.9.3",
     "puppeteer": "^25.1.0",
     "tsx": "^4.22.4",

@@ -15,10 +15,13 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import dotenv from 'dotenv';
+import express from 'express';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const SERVER_KEY_PREFIX = '__SERVER_KEY:';
 export const SERVER_KEY_ENV_PREFIX = '__SERVER_KEY_ENV:';
@@ -197,6 +200,11 @@ export interface ServerConfigSnapshot {
  * variables (`GEMINI_API_KEY`, `API_KEY`, `OPENAI_API_KEY`).
  */
 export function loadServerConfig(rootDir = process.cwd()): ServerConfigSnapshot {
+  dotenv.config({
+    path: [path.join(rootDir, '.env.local'), path.join(rootDir, '.env')],
+    quiet: true,
+  });
+
   let merged: IniSections = {};
   const fullPath = path.join(rootDir, 'models.conf');
   if (fs.existsSync(fullPath)) {
@@ -215,6 +223,7 @@ export function loadServerConfig(rootDir = process.cwd()): ServerConfigSnapshot 
   const envInjectedKeys = new Set<string>();
   const envGemini = (
     process.env['GEMINI_API_KEY'] ||
+    process.env['GOOGLE_API_KEY'] ||
     process.env['API_KEY'] ||
     ''
   ).trim();
@@ -503,6 +512,7 @@ export function createApiMiddleware(rootDir = process.cwd()) {
           const apiKey =
             realKeys['gemini_api_key'] ||
             process.env['GEMINI_API_KEY'] ||
+            process.env['GOOGLE_API_KEY'] ||
             process.env['API_KEY'] ||
             parsedTarget.searchParams.get('key') ||
             resolvedHeaders['x-goog-api-key'] ||
@@ -670,4 +680,76 @@ export function createApiMiddleware(rootDir = process.cwd()) {
 
     next();
   };
+}
+
+/**
+ * Creates a standalone Express application serving `/api/config`, `/api/upload-chunk`,
+ * `/api/proxy`, and built static client assets from `dist/`.
+ */
+export function createExpressApp(rootDir = process.cwd()) {
+  const app = express();
+  const apiMiddleware = createApiMiddleware(rootDir);
+
+  app.use((req, res, next) => {
+    void apiMiddleware(req, res, next);
+  });
+
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidateDirs = [
+    ...(path.basename(currentDir) === 'server'
+      ? [path.resolve(currentDir, '..')]
+      : []),
+    path.resolve(rootDir, 'dist'),
+  ];
+  const clientDistFolder = candidateDirs.find((dir) =>
+    fs.existsSync(path.join(dir, 'index.html')),
+  );
+
+  if (clientDistFolder) {
+    app.use(
+      express.static(clientDistFolder, {
+        maxAge: '1h',
+        index: 'index.html',
+      }),
+    );
+
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(clientDistFolder, 'index.html'));
+    });
+  }
+
+  return app;
+}
+
+/**
+ * Starts the standalone Node Express server for production/Cloud Run deployments.
+ */
+export function startServer(
+  port = Number(process.env['PORT']) || 3000,
+  rootDir = process.cwd(),
+): Server {
+  const app = createExpressApp(rootDir);
+  return app.listen(port, '0.0.0.0', () => {
+    console.log(`Node Express server listening on http://localhost:${port}`);
+  });
+}
+
+const isEntryModule = (() => {
+  try {
+    if (!process.argv[1]) return false;
+    return (
+      pathToFileURL(fs.realpathSync(process.argv[1])).href ===
+      pathToFileURL(fs.realpathSync(fileURLToPath(import.meta.url))).href
+    );
+  } catch {
+    return false;
+  }
+})();
+
+if (isEntryModule) {
+  startServer();
 }
