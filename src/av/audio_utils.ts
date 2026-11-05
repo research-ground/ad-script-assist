@@ -237,7 +237,17 @@ export async function compileADAudioTrack(
     typeof videoDuration === 'number' && isFinite(videoDuration)
       ? videoDuration
       : 0;
-  const finalDuration = Math.max(sanitizedVideoDuration, lastSegmentEnd);
+  // Cues play at natural speed from their start time, so a cue longer than
+  // its slot may overlap the next one; extend the track to fit it.
+  const lastAudioEnd = buffers.reduce(
+    (max, {buffer, startTime}) => Math.max(max, startTime + buffer.duration),
+    0,
+  );
+  const finalDuration = Math.max(
+    sanitizedVideoDuration,
+    lastSegmentEnd,
+    lastAudioEnd,
+  );
   console.log(`[compileADAudioTrack] Final track duration: ${finalDuration}s`);
 
   const numSamples = Math.max(1, Math.ceil(finalDuration * SAMPLE_RATE));
@@ -251,15 +261,10 @@ export async function compileADAudioTrack(
     SAMPLE_RATE,
   );
 
-  for (const {buffer, startTime, endTime} of buffers) {
+  for (const {buffer, startTime} of buffers) {
+    // playbackRate stays at 1.0: Web Audio resampling would shift the pitch.
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
-    if (endTime !== undefined && endTime > startTime) {
-      const slotDuration = endTime - startTime;
-      if (buffer.duration > slotDuration && slotDuration > 0.2) {
-        source.playbackRate.value = Math.min(1.5, buffer.duration / slotDuration);
-      }
-    }
     source.connect(offlineCtx.destination);
     source.start(startTime);
   }

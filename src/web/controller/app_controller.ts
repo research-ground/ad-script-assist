@@ -63,7 +63,8 @@ export class AppController {
 
   // Playback audio elements
   private readonly adAudio = new Audio();
-  private readonly segmentAudio = new Audio();
+  /** Rendered cue clips currently playing in preview (they may overlap). */
+  private readonly segmentAudios = new Set<HTMLAudioElement>();
   private segmentBlobUrl: string | null = null;
   private compiledAdTrackUrl: string | null = null;
   private lastSpokenSegmentIndex = -1;
@@ -253,32 +254,23 @@ export class AppController {
     const segments = (appState.get('adSegments') || []).filter(
       (s) => s.script.trim().length > 0,
     );
-    const intervals = await Promise.all(
+    // Measure each cue's natural audio duration (falling back to its slot).
+    const durations = await Promise.all(
       segments.map(
         (seg) =>
-          new Promise<{start: number; end: number}>((resolve) => {
+          new Promise<number>((resolve) => {
             const slotDuration = Math.max(0, seg.endTime - seg.startTime);
             if (!seg.audioData || typeof Audio === 'undefined') {
-              resolve({start: seg.startTime, end: seg.endTime});
+              resolve(slotDuration);
               return;
             }
             let settled = false;
             const finish = (rawDur: number) => {
               if (settled) return;
               settled = true;
-              let effectiveDur = slotDuration;
-              if (Number.isFinite(rawDur) && rawDur > 0) {
-                if (slotDuration > 0.2 && rawDur > slotDuration) {
-                  const rate = Math.min(1.5, rawDur / slotDuration);
-                  effectiveDur = rawDur / rate;
-                } else {
-                  effectiveDur = rawDur;
-                }
-              }
-              resolve({
-                start: seg.startTime,
-                end: seg.startTime + Math.max(slotDuration, effectiveDur),
-              });
+              resolve(
+                Number.isFinite(rawDur) && rawDur > 0 ? rawDur : slotDuration,
+              );
             };
             try {
               const audio = new Audio();
@@ -294,6 +286,12 @@ export class AppController {
       ),
     );
     if (generation !== this.speakingIntervalsGeneration) return;
+    // Cues play at natural speed from their start time (possibly overlapping);
+    // duck for at least the full cue slot, even if the audio is shorter.
+    const intervals = segments.map((seg, i) => ({
+      start: seg.startTime,
+      end: Math.max(seg.endTime, seg.startTime + durations[i]),
+    }));
     this.speakingIntervals = intervals.sort((a, b) => a.start - b.start);
   }
 
@@ -373,10 +371,7 @@ export class AppController {
   }
 
   private isFallbackSpeaking(): boolean {
-    return (
-      this.isWebSpeechActive ||
-      (!this.segmentAudio.paused && !this.segmentAudio.ended)
-    );
+    return this.isWebSpeechActive || this.segmentAudios.size > 0;
   }
 
   private stopSegmentPlayback() {
@@ -385,8 +380,11 @@ export class AppController {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
-    this.segmentAudio.pause();
-    this.segmentAudio.src = '';
+    for (const audio of this.segmentAudios) {
+      audio.pause();
+      audio.src = '';
+    }
+    this.segmentAudios.clear();
     if (this.segmentBlobUrl) {
       URL.revokeObjectURL(this.segmentBlobUrl);
       this.segmentBlobUrl = null;
@@ -414,25 +412,26 @@ export class AppController {
     this.lastSpokenSegmentIndex = activeIdx;
     const seg = segments[activeIdx];
 
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    this.isWebSpeechActive = false;
-    this.segmentAudio.pause();
-    if (this.segmentBlobUrl) {
-      URL.revokeObjectURL(this.segmentBlobUrl);
-      this.segmentBlobUrl = null;
-    }
-
+    // Rendered cues play to completion at natural speed and may overlap the
+    // next cue, matching the compiled AD track.
     if (typeof seg.audioData === 'string' && seg.audioData.length > 0) {
-      this.segmentAudio.src = seg.audioData;
+      const audio = new Audio(seg.audioData);
+      const release = () => {
+        this.segmentAudios.delete(audio);
+      };
+      audio.onended = release;
+      audio.onerror = release;
+      this.segmentAudios.add(audio);
       const offset = Math.max(0, currentTime - seg.startTime);
-      this.segmentAudio.currentTime = offset;
-      void this.segmentAudio.play().catch(() => {});
+      audio.currentTime = offset;
+      void audio.play().catch(release);
       return;
     }
 
+    // Web Speech cannot overlap utterances, so a new cue replaces the old one.
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      this.isWebSpeechActive = false;
       const utterance = new SpeechSynthesisUtterance(seg.script);
       utterance.lang = appState.get('ttsLanguage') || 'en-US';
       this.isWebSpeechActive = true;
