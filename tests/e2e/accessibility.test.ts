@@ -21,7 +21,7 @@ import { setupUITest, teardownUITest } from '../ui/ui_test_utils';
 
 test('Accessibility: All controls are reachable via Tab key', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   
   try {
     // 1. Wait for page to load
@@ -51,8 +51,8 @@ test('Accessibility: All controls are reachable via Tab key', async (t) => {
         let activeEl: Element | null = null;
         
         while (current) {
-          const active = (current as any).activeElement;
-          if (!active || active === current || active === document.body) break;
+          const active: Element | null = (current as any).activeElement;
+          if (!active || active === (current as Node) || active === document.body) break;
           activeEl = active;
           if (active.shadowRoot) {
             current = active.shadowRoot;

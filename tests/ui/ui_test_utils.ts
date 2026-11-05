@@ -15,11 +15,11 @@
  */
 
 import { execSync } from 'child_process';
-import puppeteer from 'puppeteer';
+import puppeteer, { type Browser, type Page } from 'puppeteer';
 import path from 'path';
 
 let previewProcess: any = null;
-let browser: puppeteer.Browser | null = null;
+let browser: Browser | null = null;
 
 // Cleanup preview server process when test runner exits
 const cleanupServer = () => {
@@ -71,7 +71,7 @@ export async function setupUITest() {
 
   const page = await browser.newPage();
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
-  page.on('pageerror', err => console.error('PAGE ERROR:', err.message));
+  page.on('pageerror', err => console.error('PAGE ERROR:', (err as Error).message));
   await page.goto('http://localhost:5173', { waitUntil: 'networkidle0' });
   return page;
 }
@@ -85,12 +85,12 @@ export async function teardownUITest() {
   cleanupServer();
 }
 
-export async function activate(page: puppeteer.Page, selector: string) {
+export async function activate(page: Page, selector: string) {
     const el = await page.locator(selector).waitHandle();
     await el.evaluate((e: any) => e.click());
 }
 
-export async function uploadLocalVideo(page: puppeteer.Page, relPath: string) {
+export async function uploadLocalVideo(page: Page, relPath: string) {
     const fileInput = await page.locator('main-page >>> add-video-modal >>> input[type="file"]').waitHandle();
     const videoPath = path.resolve(process.cwd(), relPath);
     await fileInput.uploadFile(videoPath);

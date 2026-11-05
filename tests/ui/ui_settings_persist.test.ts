@@ -38,34 +38,39 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
 
   // Change TTS Engine to Local Kokoro
   const ttsSelect = await page.locator('main-page >>> settings-modal >>> #tts-provider-select').waitHandle();
-  await ttsSelect.evaluate((el: HTMLSelectElement) => {
+  await ttsSelect.evaluate((node) => {
+    const el = node as HTMLSelectElement;
     el.value = 'kokoro';
     el.dispatchEvent(new Event('change'));
   });
 
   // Change Language
   const langSelect = await page.locator('main-page >>> settings-modal >>> #language-select').waitHandle();
-  await langSelect.evaluate((el: HTMLSelectElement) => {
+  await langSelect.evaluate((node) => {
+    const el = node as HTMLSelectElement;
     el.value = 'es-ES';
     el.dispatchEvent(new Event('change'));
   });
 
   // Change Audio Ducking parameters
   const duckVolInput = await page.locator('main-page >>> settings-modal >>> #duck-volume-percent').waitHandle();
-  await duckVolInput.evaluate((el: HTMLInputElement) => {
+  await duckVolInput.evaluate((node) => {
+    const el = node as HTMLInputElement;
     el.value = '20';
     el.dispatchEvent(new Event('input'));
   });
 
   const duckAttackInput = await page.locator('main-page >>> settings-modal >>> #duck-attack-ms').waitHandle();
-  await duckAttackInput.evaluate((el: HTMLInputElement) => {
+  await duckAttackInput.evaluate((node) => {
+    const el = node as HTMLInputElement;
     el.value = '80';
     el.dispatchEvent(new Event('input'));
   });
 
   // Change first Hotkey
   const hotkeyInput = await page.locator('main-page >>> settings-modal >>> .hotkey-input-keycombo').waitHandle();
-  await hotkeyInput.evaluate((el: HTMLInputElement) => {
+  await hotkeyInput.evaluate((node) => {
+    const el = node as HTMLInputElement;
     el.value = 'Ctrl+Shift+Z';
     el.dispatchEvent(new Event('input'));
   });

@@ -19,6 +19,7 @@ import * as assert from 'node:assert';
 import fs from 'fs';
 import path from 'path';
 import {ALL_FORMATS, BufferSource, Input} from 'mediabunny';
+import type {JSHandle} from 'puppeteer';
 import {applyDuckingEnvelope, detectSpeechSpans} from '../../src/av/mediabunny_video_exporter';
 import {setupUITest, teardownUITest, uploadLocalVideo} from './ui_test_utils';
 
@@ -85,7 +86,7 @@ test('Export Mixed Video produces an MP4 with the original video and an AAC mix'
       const button = buttons.find((b) => b.textContent?.trim() === 'Export Mixed Video');
       return button && !button.disabled ? button : null;
     }, {timeout: 10000});
-    await exportButton.evaluate((b: any) => b.click());
+    await (exportButton as JSHandle<HTMLButtonElement>).evaluate((b) => b.click());
 
     const deadline = Date.now() + 60000;
     while (!fs.existsSync(OUT_FILE) && Date.now() < deadline) {

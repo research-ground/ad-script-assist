@@ -17,24 +17,24 @@
 import test from 'node:test';
 import * as assert from 'node:assert';
 import path from 'path';
-import puppeteer from 'puppeteer';
+import type { KeyInput, Page } from 'puppeteer';
 import 'dotenv/config';
 import { setupUITest, teardownUITest } from '../ui/ui_test_utils';
 
 // Helper to press hotkeys easily
-async function pressHotkey(page: puppeteer.Page, key: string, modifier: 'Control' | 'Meta' = 'Control') {
+async function pressHotkey(page: Page, key: KeyInput, modifier: 'Control' | 'Meta' = 'Control') {
   await page.keyboard.down(modifier);
   await page.keyboard.press(key);
   await page.keyboard.up(modifier);
 }
 
 // Debug helper to print active element shadow path
-async function printActiveElement(page: puppeteer.Page) {
+async function printActiveElement(page: Page) {
   const activeTree = await page.evaluate(() => {
     const path = [];
     let current: Document | ShadowRoot | Element | null = document;
     while (current) {
-      const active = (current as any).activeElement;
+      const active: Element | null = (current as any).activeElement;
       if (!active) break;
       path.push({
         tagName: active.tagName,
@@ -54,7 +54,7 @@ async function printActiveElement(page: puppeteer.Page) {
 }
 
 // Helper to activate focus + Enter using ElementHandle.press
-async function keyboardActivate(page: puppeteer.Page, selector: string) {
+async function keyboardActivate(page: Page, selector: string) {
   try {
     const el = await page.locator(selector).waitHandle();
     await el.focus();
@@ -68,7 +68,7 @@ async function keyboardActivate(page: puppeteer.Page, selector: string) {
   }
 }
 
-async function waitForSettingsModalToClose(page: puppeteer.Page) {
+async function waitForSettingsModalToClose(page: Page) {
   await page.waitForFunction(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
     const dialog = modal?.shadowRoot?.querySelector('dialog');
@@ -76,7 +76,7 @@ async function waitForSettingsModalToClose(page: puppeteer.Page) {
   }, { timeout: 5000 });
 }
 
-async function waitForAddVideoModalToClose(page: puppeteer.Page) {
+async function waitForAddVideoModalToClose(page: Page) {
   await page.waitForFunction(() => {
     const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('add-video-modal');
     const dialog = modal?.shadowRoot?.querySelector('dialog');
@@ -85,7 +85,7 @@ async function waitForAddVideoModalToClose(page: puppeteer.Page) {
 }
 
 // Helper to wait for agent response
-async function waitForAgentResponse(page: puppeteer.Page) {
+async function waitForAgentResponse(page: Page) {
   await page.waitForFunction(() => {
     const chat = document.querySelector('main-page')?.shadowRoot?.querySelector('agent-chat');
     return chat && !(chat as any).isResponding;
@@ -93,7 +93,7 @@ async function waitForAgentResponse(page: puppeteer.Page) {
 }
 
 // Helper to wait for AD speech generation to complete
-async function waitForSpeechGeneration(page: puppeteer.Page) {
+async function waitForSpeechGeneration(page: Page) {
   await page.waitForFunction(() => {
     const state = (window as any).appState;
     if (!state || state.get('isAdAudioGenerating')) return false;
@@ -102,7 +102,7 @@ async function waitForSpeechGeneration(page: puppeteer.Page) {
   }, { timeout: 120000 });
 }
 
-async function getSegmentsSummary(page: puppeteer.Page): Promise<string> {
+async function getSegmentsSummary(page: Page): Promise<string> {
   return page.evaluate(() => {
     const segs = (window as any).appState?.get('adSegments') || [];
     return segs.map((s: any) => s.script).join('\n');
@@ -110,7 +110,7 @@ async function getSegmentsSummary(page: puppeteer.Page): Promise<string> {
 }
 
 // Helper to clear localStorage and clean state
-async function clearAppState(page: puppeteer.Page) {
+async function clearAppState(page: Page) {
   await page.evaluate(() => {
     window.localStorage.clear();
   });
@@ -122,7 +122,7 @@ const openaiKey = process.env.OPENAI_API_KEY || 'mock_openai_key';
 
 test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
@@ -247,7 +247,7 @@ test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
 
 test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
@@ -337,7 +337,7 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
 
 test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
@@ -407,7 +407,7 @@ test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
 
 test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
@@ -479,7 +479,7 @@ test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (
 
 test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
@@ -573,7 +573,7 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
 
 test('Workflow 6: Keyboard focus test (YT + Gemini only) (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
-  page.on('pageerror', err => console.error('BROWSER ERROR:', err.message));
+  page.on('pageerror', err => console.error('BROWSER ERROR:', (err as Error).message));
   try {
     await clearAppState(page);
 
