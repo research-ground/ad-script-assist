@@ -43,6 +43,11 @@ import { describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
 import {
   DEFAULT_AGENT_MODEL,
+  DEFAULT_AUDIO_DUCKING_ENABLED,
+  DEFAULT_DUCK_ATTACK_MS,
+  DEFAULT_DUCK_HOLD_MS,
+  DEFAULT_DUCK_RELEASE_MS,
+  DEFAULT_DUCK_VOLUME_PERCENT,
   DEFAULT_OPENAI_MODEL,
   getDefaultVoiceForTtsProvider,
   getInjectedGeminiApiKey,
@@ -63,6 +68,11 @@ export class AppController {
   private compiledAdTrackUrl: string | null = null;
   private lastSpokenSegmentIndex = -1;
   private isWebSpeechActive = false;
+
+  // Audio ducking state
+  private currentVideoVolume = 1.0;
+  private speakingIntervals: Array<{start: number; end: number}> = [];
+  private speakingIntervalsGeneration = 0;
 
   private hotkeyManager = new HotkeyManager();
   private hotkeysUpdatedListener?: () => void;
@@ -137,6 +147,7 @@ export class AppController {
         if (!speak) {
           this.adAudio.pause();
           this.stopSegmentPlayback();
+          this.setVideoVolume(1.0);
         } else {
           const player = appState.get('videoPlayerApi');
           if (player && !player.paused) {
@@ -146,12 +157,40 @@ export class AppController {
       })
     );
 
+    // Subscribe to adSegments and ducking settings to keep ducking intervals & volume updated
+    this.unsubscribes.push(
+      appState.subscribe('adSegments', () => {
+        void this.recomputeSpeakingIntervals();
+      }),
+      appState.subscribe('audioDuckingEnabled', () => {
+        const player = appState.get('videoPlayerApi');
+        if (player) this.updateVideoDucking(player.currentTime);
+      }),
+      appState.subscribe('duckVolumePercent', () => {
+        const player = appState.get('videoPlayerApi');
+        if (player) this.updateVideoDucking(player.currentTime);
+      }),
+      appState.subscribe('duckAttackMs', () => {
+        const player = appState.get('videoPlayerApi');
+        if (player) this.updateVideoDucking(player.currentTime);
+      }),
+      appState.subscribe('duckReleaseMs', () => {
+        const player = appState.get('videoPlayerApi');
+        if (player) this.updateVideoDucking(player.currentTime);
+      }),
+      appState.subscribe('duckHoldMs', () => {
+        const player = appState.get('videoPlayerApi');
+        if (player) this.updateVideoDucking(player.currentTime);
+      }),
+    );
+
     // Sync state: when video resumes play
     this.unsubscribes.push(
       appState.subscribe('isVideoPaused', (paused) => {
         if (paused) {
           this.adAudio.pause();
           this.stopSegmentPlayback();
+          this.setVideoVolume(1.0);
         } else {
           this.syncAdAudioWithVideo();
         }
@@ -195,6 +234,143 @@ export class AppController {
   }
 
   // --- Playback Sync ---
+
+  private setVideoVolume(level: number) {
+    const clamped = Math.max(0, Math.min(1, level));
+    if (Math.abs(clamped - this.currentVideoVolume) < 0.005) return;
+    const player = appState.get('videoPlayerApi');
+    if (!player || typeof player.setVolume !== 'function') return;
+    this.currentVideoVolume = clamped;
+    try {
+      player.setVolume(clamped);
+    } catch {
+      // Ignore if player is not yet ready
+    }
+  }
+
+  private async recomputeSpeakingIntervals() {
+    const generation = ++this.speakingIntervalsGeneration;
+    const segments = (appState.get('adSegments') || []).filter(
+      (s) => s.script.trim().length > 0,
+    );
+    const intervals = await Promise.all(
+      segments.map(
+        (seg) =>
+          new Promise<{start: number; end: number}>((resolve) => {
+            const slotDuration = Math.max(0, seg.endTime - seg.startTime);
+            if (!seg.audioData || typeof Audio === 'undefined') {
+              resolve({start: seg.startTime, end: seg.endTime});
+              return;
+            }
+            let settled = false;
+            const finish = (rawDur: number) => {
+              if (settled) return;
+              settled = true;
+              let effectiveDur = slotDuration;
+              if (Number.isFinite(rawDur) && rawDur > 0) {
+                if (slotDuration > 0.2 && rawDur > slotDuration) {
+                  const rate = Math.min(1.5, rawDur / slotDuration);
+                  effectiveDur = rawDur / rate;
+                } else {
+                  effectiveDur = rawDur;
+                }
+              }
+              resolve({
+                start: seg.startTime,
+                end: seg.startTime + Math.max(slotDuration, effectiveDur),
+              });
+            };
+            try {
+              const audio = new Audio();
+              audio.preload = 'metadata';
+              audio.onloadedmetadata = () => finish(audio.duration);
+              audio.onerror = () => finish(NaN);
+              setTimeout(() => finish(audio.duration), 1500);
+              audio.src = seg.audioData;
+            } catch {
+              finish(NaN);
+            }
+          }),
+      ),
+    );
+    if (generation !== this.speakingIntervalsGeneration) return;
+    this.speakingIntervals = intervals.sort((a, b) => a.start - b.start);
+  }
+
+  public computeTargetVideoVolume(currentTime: number): number {
+    const speakAdText = appState.get('speakAdText') ?? true;
+    const duckingEnabled =
+      appState.get('audioDuckingEnabled') ?? DEFAULT_AUDIO_DUCKING_ENABLED;
+    const player = appState.get('videoPlayerApi');
+    const isPlaying =
+      Boolean(player) && !player!.paused && !appState.get('isVideoPaused');
+
+    if (!speakAdText || !duckingEnabled || !isPlaying) {
+      return 1.0;
+    }
+
+    const duckPct =
+      appState.get('duckVolumePercent') ?? DEFAULT_DUCK_VOLUME_PERCENT;
+    const duckLevel = Math.max(0, Math.min(1, duckPct / 100));
+    if (duckLevel >= 1) {
+      return 1.0;
+    }
+
+    if (this.isFallbackSpeaking()) {
+      return duckLevel;
+    }
+
+    const attackSec = Math.max(
+      0,
+      (appState.get('duckAttackMs') ?? DEFAULT_DUCK_ATTACK_MS) / 1000,
+    );
+    const releaseSec = Math.max(
+      0,
+      (appState.get('duckReleaseMs') ?? DEFAULT_DUCK_RELEASE_MS) / 1000,
+    );
+    const holdSec = Math.max(
+      0,
+      (appState.get('duckHoldMs') ?? DEFAULT_DUCK_HOLD_MS) / 1000,
+    );
+
+    const rawIntervals =
+      this.speakingIntervals.length > 0
+        ? this.speakingIntervals
+        : (appState.get('adSegments') || [])
+            .filter((s) => s.script.trim().length > 0)
+            .map((s) => ({start: s.startTime, end: s.endTime}));
+
+    let target = 1.0;
+    for (const iv of rawIntervals) {
+      const start = iv.start;
+      const holdEnd = iv.end + holdSec;
+      if (currentTime >= start && currentTime <= holdEnd) {
+        target = Math.min(target, duckLevel);
+      } else if (
+        attackSec > 0 &&
+        currentTime >= start - attackSec &&
+        currentTime < start
+      ) {
+        const frac = (currentTime - (start - attackSec)) / attackSec;
+        const g = 1.0 - (1.0 - duckLevel) * frac;
+        target = Math.min(target, g);
+      } else if (
+        releaseSec > 0 &&
+        currentTime > holdEnd &&
+        currentTime <= holdEnd + releaseSec
+      ) {
+        const frac = (currentTime - holdEnd) / releaseSec;
+        const g = duckLevel + (1.0 - duckLevel) * frac;
+        target = Math.min(target, g);
+      }
+    }
+
+    return target;
+  }
+
+  private updateVideoDucking(currentTime: number) {
+    this.setVideoVolume(this.computeTargetVideoVolume(currentTime));
+  }
 
   private isFallbackSpeaking(): boolean {
     return (
@@ -248,10 +424,8 @@ export class AppController {
       this.segmentBlobUrl = null;
     }
 
-    if (seg.audioData && seg.audioData.byteLength > 0) {
-      const blob = new Blob([seg.audioData], {type: 'audio/wav'});
-      this.segmentBlobUrl = URL.createObjectURL(blob);
-      this.segmentAudio.src = this.segmentBlobUrl;
+    if (typeof seg.audioData === 'string' && seg.audioData.length > 0) {
+      this.segmentAudio.src = seg.audioData;
       const offset = Math.max(0, currentTime - seg.startTime);
       this.segmentAudio.currentTime = offset;
       void this.segmentAudio.play().catch(() => {});
@@ -277,6 +451,7 @@ export class AppController {
     if (!speakAdText) {
       this.adAudio.pause();
       this.stopSegmentPlayback();
+      this.setVideoVolume(1.0);
       return;
     }
     const player = appState.get('videoPlayerApi');
@@ -293,14 +468,17 @@ export class AppController {
       }
       if (isPlaying) {
         void this.adAudio.play().catch(() => {});
+        this.updateVideoDucking(targetTime);
       } else {
         this.adAudio.pause();
+        this.setVideoVolume(1.0);
       }
       return;
     }
 
     if (!isPlaying) {
       this.stopSegmentPlayback();
+      this.setVideoVolume(1.0);
       return;
     }
 
@@ -315,6 +493,7 @@ export class AppController {
       this.stopSegmentPlayback();
     }
     this.speakFallbackForTime(targetTime);
+    this.updateVideoDucking(targetTime);
   }
 
   public handleTimeUpdate(currentTime: number) {
@@ -322,6 +501,7 @@ export class AppController {
     if (!speakAdText) {
       this.adAudio.pause();
       this.stopSegmentPlayback();
+      this.setVideoVolume(1.0);
       return;
     }
     const player = appState.get('videoPlayerApi');
@@ -330,6 +510,7 @@ export class AppController {
     // Sync compiled ad track if ready and no fallback speech is mid-utterance
     if (this.compiledAdTrackUrl && !player.paused) {
       if (this.isFallbackSpeaking()) {
+        this.updateVideoDucking(currentTime);
         return;
       }
       if (Math.abs(this.adAudio.currentTime - currentTime) > 0.3) {
@@ -338,12 +519,14 @@ export class AppController {
       if (this.adAudio.paused) {
         void this.adAudio.play().catch(() => {});
       }
+      this.updateVideoDucking(currentTime);
       return;
     }
 
     if (!player.paused) {
       this.speakFallbackForTime(currentTime);
     }
+    this.updateVideoDucking(currentTime);
   }
 
   // --- Database Loads ---
@@ -384,6 +567,8 @@ export class AppController {
     this.adAudio.pause();
     this.adAudio.src = '';
     this.stopSegmentPlayback();
+    this.speakingIntervals = [];
+    this.setVideoVolume(1.0);
     appState.set('adSegments', []);
     appState.set('conversationLog', []);
     if (this.onScriptUpdateCallback) {
@@ -751,6 +936,13 @@ export class AppController {
         const blob = await exporter.exportMixedVideo({
           video: localVideoFile,
           adTrack: await (await fetch(adTrackUrl)).blob(),
+          ducking: {
+            enabled: appState.get('audioDuckingEnabled') ?? DEFAULT_AUDIO_DUCKING_ENABLED,
+            duckVolumePercent: appState.get('duckVolumePercent') ?? DEFAULT_DUCK_VOLUME_PERCENT,
+            attackMs: appState.get('duckAttackMs') ?? DEFAULT_DUCK_ATTACK_MS,
+            releaseMs: appState.get('duckReleaseMs') ?? DEFAULT_DUCK_RELEASE_MS,
+            holdMs: appState.get('duckHoldMs') ?? DEFAULT_DUCK_HOLD_MS,
+          },
           onProgress: (p) => appState.set('statusMessage', `Exporting video: ${Math.round(p * 100)}%`),
         });
         const url = URL.createObjectURL(blob);
@@ -819,6 +1011,11 @@ export class AppController {
     ttsProvider?: 'gemini' | 'openai' | 'kokoro';
     ttsLanguage?: string;
     ttsVoice?: string;
+    audioDuckingEnabled?: boolean;
+    duckVolumePercent?: number;
+    duckAttackMs?: number;
+    duckReleaseMs?: number;
+    duckHoldMs?: number;
     hotkeys?: HotkeyConfigEntry[];
   }) {
     if (settings.ttsProvider !== undefined) {
@@ -834,6 +1031,24 @@ export class AppController {
     }
     if (settings.ttsVoice !== undefined) {
       appState.set('ttsVoice', settings.ttsVoice);
+    }
+    if (settings.audioDuckingEnabled !== undefined) {
+      appState.set('audioDuckingEnabled', settings.audioDuckingEnabled);
+    }
+    if (settings.duckVolumePercent !== undefined) {
+      appState.set(
+        'duckVolumePercent',
+        Math.max(0, Math.min(100, settings.duckVolumePercent)),
+      );
+    }
+    if (settings.duckAttackMs !== undefined) {
+      appState.set('duckAttackMs', Math.max(0, Math.min(2000, settings.duckAttackMs)));
+    }
+    if (settings.duckReleaseMs !== undefined) {
+      appState.set('duckReleaseMs', Math.max(0, Math.min(2000, settings.duckReleaseMs)));
+    }
+    if (settings.duckHoldMs !== undefined) {
+      appState.set('duckHoldMs', Math.max(0, Math.min(2000, settings.duckHoldMs)));
     }
 
     if (settings.hotkeys) {
@@ -854,6 +1069,11 @@ export class AppController {
     appState.set('ttsProvider', cloudTtsProvider);
     appState.set('ttsLanguage', 'en-US');
     appState.set('ttsVoice', getDefaultVoiceForTtsProvider(cloudTtsProvider));
+    appState.set('audioDuckingEnabled', DEFAULT_AUDIO_DUCKING_ENABLED);
+    appState.set('duckVolumePercent', DEFAULT_DUCK_VOLUME_PERCENT);
+    appState.set('duckAttackMs', DEFAULT_DUCK_ATTACK_MS);
+    appState.set('duckReleaseMs', DEFAULT_DUCK_RELEASE_MS);
+    appState.set('duckHoldMs', DEFAULT_DUCK_HOLD_MS);
     await appState.loadServerConfig();
 
     window.dispatchEvent(new CustomEvent('hotkeys-updated'));

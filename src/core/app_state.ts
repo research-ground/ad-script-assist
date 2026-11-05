@@ -22,6 +22,11 @@
 import {AdSegment, VideoPlayerApi, ConversationEntry} from './types';
 import {
   DEFAULT_AGENT_MODEL,
+  DEFAULT_AUDIO_DUCKING_ENABLED,
+  DEFAULT_DUCK_ATTACK_MS,
+  DEFAULT_DUCK_HOLD_MS,
+  DEFAULT_DUCK_RELEASE_MS,
+  DEFAULT_DUCK_VOLUME_PERCENT,
   DEFAULT_KOKORO_VOICE,
   DEFAULT_OPENAI_MODEL,
   DEFAULT_OPENAI_TTS_MODEL,
@@ -77,6 +82,13 @@ export interface AppState {
   speechModel: string; // '' = DEFAULT_SPEECH_MODEL
   openaiTtsModel: string; // '' = DEFAULT_OPENAI_TTS_MODEL
 
+  // Audio Ducking User Settings
+  audioDuckingEnabled: boolean;
+  duckVolumePercent: number;
+  duckAttackMs: number;
+  duckReleaseMs: number;
+  duckHoldMs: number;
+
   // Project Settings (Saved per-video)
   ttsVoice: string;
   speakAdText: boolean;
@@ -89,7 +101,15 @@ export interface AppState {
 
 type StateListener<T> = (value: T) => void;
 
-const USER_SETTINGS_KEYS = ['ttsProvider', 'ttsLanguage'] as const;
+const USER_SETTINGS_KEYS = [
+  'ttsProvider',
+  'ttsLanguage',
+  'audioDuckingEnabled',
+  'duckVolumePercent',
+  'duckAttackMs',
+  'duckReleaseMs',
+  'duckHoldMs',
+] as const;
 const PROJECT_SETTINGS_KEYS = [
   'currentVideoId',
   'ttsVoice',
@@ -173,6 +193,12 @@ class AppStateManager {
     speechModel: DEFAULT_SPEECH_MODEL,
     openaiTtsModel: DEFAULT_OPENAI_TTS_MODEL,
 
+    audioDuckingEnabled: DEFAULT_AUDIO_DUCKING_ENABLED,
+    duckVolumePercent: DEFAULT_DUCK_VOLUME_PERCENT,
+    duckAttackMs: DEFAULT_DUCK_ATTACK_MS,
+    duckReleaseMs: DEFAULT_DUCK_RELEASE_MS,
+    duckHoldMs: DEFAULT_DUCK_HOLD_MS,
+
     ttsVoice: DEFAULT_KOKORO_VOICE,
     speakAdText: true,
     videoType: 'youtube',
@@ -207,6 +233,41 @@ class AppStateManager {
       }
       this.state.ttsLanguage =
         localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
+
+      const savedDuckEnabled = localStorage.getItem('userSettings_audioDuckingEnabled');
+      if (savedDuckEnabled !== null) {
+        this.state.audioDuckingEnabled = savedDuckEnabled === 'true';
+      }
+      const parseNumSetting = (key: string, fallback: number, min: number, max: number) => {
+        const rawVal = localStorage.getItem(key);
+        if (rawVal === null) return fallback;
+        const parsed = Number(rawVal);
+        return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+      };
+      this.state.duckVolumePercent = parseNumSetting(
+        'userSettings_duckVolumePercent',
+        DEFAULT_DUCK_VOLUME_PERCENT,
+        0,
+        100,
+      );
+      this.state.duckAttackMs = parseNumSetting(
+        'userSettings_duckAttackMs',
+        DEFAULT_DUCK_ATTACK_MS,
+        0,
+        2000,
+      );
+      this.state.duckReleaseMs = parseNumSetting(
+        'userSettings_duckReleaseMs',
+        DEFAULT_DUCK_RELEASE_MS,
+        0,
+        2000,
+      );
+      this.state.duckHoldMs = parseNumSetting(
+        'userSettings_duckHoldMs',
+        DEFAULT_DUCK_HOLD_MS,
+        0,
+        2000,
+      );
 
       // Load active project settings immediately
       const raw = localStorage.getItem('projectSettings_active');

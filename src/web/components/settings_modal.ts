@@ -20,16 +20,23 @@ import {customElement, query, state} from 'lit/decorators.js';
 import {HotkeyConfigEntry} from '../../core/types';
 import {getDefaultHotkeyConfigs} from '../hotkeys';
 import {retrieveHotkeyConfigsFromDB} from '../storage/db';
-import {TTS_LANGUAGES} from '../../core/constants';
+import {
+  DEFAULT_AUDIO_DUCKING_ENABLED,
+  DEFAULT_DUCK_ATTACK_MS,
+  DEFAULT_DUCK_HOLD_MS,
+  DEFAULT_DUCK_RELEASE_MS,
+  DEFAULT_DUCK_VOLUME_PERCENT,
+  TTS_LANGUAGES,
+} from '../../core/constants';
 import {showConfirm} from './confirm_modal';
 import {appState} from '../../core/app_state';
 import {styles} from './settings_modal_styles';
 import {AppController} from '../controller/app_controller';
 
 /**
- * Component for configuring user preferences (TTS mode, voice language, and
- * keyboard shortcuts). AI providers, model versions, and API keys are
- * configured on the server in `models.conf`.
+ * Component for configuring user preferences (TTS mode, voice language,
+ * audio ducking, and keyboard shortcuts). AI providers, model versions, and
+ * API keys are configured on the server in `models.conf`.
  */
 @customElement('settings-modal')
 export class SettingsModal extends LitElement {
@@ -41,6 +48,16 @@ export class SettingsModal extends LitElement {
   @state() originalTtsProvider: 'gemini' | 'openai' | 'kokoro' = 'gemini';
   @state() currentLanguage: string = 'en-US';
   @state() originalLanguage: string = 'en-US';
+  @state() currentAudioDuckingEnabled: boolean = DEFAULT_AUDIO_DUCKING_ENABLED;
+  @state() originalAudioDuckingEnabled: boolean = DEFAULT_AUDIO_DUCKING_ENABLED;
+  @state() currentDuckVolumePercent: number = DEFAULT_DUCK_VOLUME_PERCENT;
+  @state() originalDuckVolumePercent: number = DEFAULT_DUCK_VOLUME_PERCENT;
+  @state() currentDuckAttackMs: number = DEFAULT_DUCK_ATTACK_MS;
+  @state() originalDuckAttackMs: number = DEFAULT_DUCK_ATTACK_MS;
+  @state() currentDuckReleaseMs: number = DEFAULT_DUCK_RELEASE_MS;
+  @state() originalDuckReleaseMs: number = DEFAULT_DUCK_RELEASE_MS;
+  @state() currentDuckHoldMs: number = DEFAULT_DUCK_HOLD_MS;
+  @state() originalDuckHoldMs: number = DEFAULT_DUCK_HOLD_MS;
   @state() private isLoadingConfigs = true;
 
   private defaultCombos = new Map<string, string | undefined>();
@@ -154,6 +171,26 @@ export class SettingsModal extends LitElement {
       this.originalTtsProvider = this.currentTtsProvider;
       this.currentLanguage = appState.get('ttsLanguage') || 'en-US';
       this.originalLanguage = this.currentLanguage;
+
+      this.currentAudioDuckingEnabled =
+        appState.get('audioDuckingEnabled') ?? DEFAULT_AUDIO_DUCKING_ENABLED;
+      this.originalAudioDuckingEnabled = this.currentAudioDuckingEnabled;
+
+      this.currentDuckVolumePercent =
+        appState.get('duckVolumePercent') ?? DEFAULT_DUCK_VOLUME_PERCENT;
+      this.originalDuckVolumePercent = this.currentDuckVolumePercent;
+
+      this.currentDuckAttackMs =
+        appState.get('duckAttackMs') ?? DEFAULT_DUCK_ATTACK_MS;
+      this.originalDuckAttackMs = this.currentDuckAttackMs;
+
+      this.currentDuckReleaseMs =
+        appState.get('duckReleaseMs') ?? DEFAULT_DUCK_RELEASE_MS;
+      this.originalDuckReleaseMs = this.currentDuckReleaseMs;
+
+      this.currentDuckHoldMs =
+        appState.get('duckHoldMs') ?? DEFAULT_DUCK_HOLD_MS;
+      this.originalDuckHoldMs = this.currentDuckHoldMs;
     } finally {
       this.isLoadingConfigs = false;
     }
@@ -172,7 +209,12 @@ export class SettingsModal extends LitElement {
       JSON.stringify(this.currentHotkeys) !==
         JSON.stringify(this.originalHotkeys) ||
       this.currentTtsProvider !== this.originalTtsProvider ||
-      this.currentLanguage !== this.originalLanguage
+      this.currentLanguage !== this.originalLanguage ||
+      this.currentAudioDuckingEnabled !== this.originalAudioDuckingEnabled ||
+      this.currentDuckVolumePercent !== this.originalDuckVolumePercent ||
+      this.currentDuckAttackMs !== this.originalDuckAttackMs ||
+      this.currentDuckReleaseMs !== this.originalDuckReleaseMs ||
+      this.currentDuckHoldMs !== this.originalDuckHoldMs
     );
   }
 
@@ -187,6 +229,11 @@ export class SettingsModal extends LitElement {
       await this.controller.saveSettings({
         ttsProvider: this.currentTtsProvider,
         ttsLanguage: this.currentLanguage,
+        audioDuckingEnabled: this.currentAudioDuckingEnabled,
+        duckVolumePercent: this.currentDuckVolumePercent,
+        duckAttackMs: this.currentDuckAttackMs,
+        duckReleaseMs: this.currentDuckReleaseMs,
+        duckHoldMs: this.currentDuckHoldMs,
         hotkeys: changedHotkeys.length > 0 ? this.currentHotkeys : undefined,
       });
 
@@ -309,6 +356,148 @@ export class SettingsModal extends LitElement {
 
                       <div class="help-text" style="margin-top: 4px;">
                         AI providers, model versions, and API keys are configured on the server in <code>models.conf</code>.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section">
+                    <div class="section-header">
+                      <h2>Audio Ducking</h2>
+                    </div>
+                    <div
+                      class="ducking-container"
+                      style="padding: 10px; display: flex; flex-direction: column; gap: 12px;">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <input
+                          id="audio-ducking-enabled"
+                          type="checkbox"
+                          .checked=${this.currentAudioDuckingEnabled}
+                          aria-describedby="ducking-help-text"
+                          @change=${(e: Event) => {
+                            if (e.target instanceof HTMLInputElement) {
+                              this.currentAudioDuckingEnabled = e.target.checked;
+                            }
+                          }} />
+                        <label
+                          for="audio-ducking-enabled"
+                          style="font-weight: 500; cursor: pointer;">
+                          Enable Audio Ducking
+                        </label>
+                      </div>
+                      <div id="ducking-help-text" class="help-text">
+                        Automatically lowers the original video volume while Audio Description narration is playing and when exporting mixed video.
+                      </div>
+
+                      <div
+                        class="ducking-params-grid"
+                        style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div>
+                          <label for="duck-volume-percent">
+                            Ducked Video Volume (%):
+                          </label>
+                          <input
+                            id="duck-volume-percent"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="5"
+                            style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                            .value=${String(this.currentDuckVolumePercent)}
+                            .disabled=${!this.currentAudioDuckingEnabled}
+                            aria-describedby="duck-volume-help"
+                            @input=${(e: Event) => {
+                              if (e.target instanceof HTMLInputElement) {
+                                const v = Number(e.target.value);
+                                if (Number.isFinite(v)) {
+                                  this.currentDuckVolumePercent = Math.max(0, Math.min(100, v));
+                                }
+                              }
+                            }} />
+                          <div id="duck-volume-help" class="help-text" style="margin-top: 4px;">
+                            Target background volume during speech (default: 35%).
+                          </div>
+                        </div>
+
+                        <div>
+                          <label for="duck-attack-ms">
+                            Fade-Down / Attack (ms):
+                          </label>
+                          <input
+                            id="duck-attack-ms"
+                            type="number"
+                            min="0"
+                            max="2000"
+                            step="10"
+                            style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                            .value=${String(this.currentDuckAttackMs)}
+                            .disabled=${!this.currentAudioDuckingEnabled}
+                            aria-describedby="duck-attack-help"
+                            @input=${(e: Event) => {
+                              if (e.target instanceof HTMLInputElement) {
+                                const v = Number(e.target.value);
+                                if (Number.isFinite(v)) {
+                                  this.currentDuckAttackMs = Math.max(0, Math.min(2000, v));
+                                }
+                              }
+                            }} />
+                          <div id="duck-attack-help" class="help-text" style="margin-top: 4px;">
+                            Ramp-down time before each cue (default: 50ms).
+                          </div>
+                        </div>
+
+                        <div>
+                          <label for="duck-release-ms">
+                            Fade-Up / Release (ms):
+                          </label>
+                          <input
+                            id="duck-release-ms"
+                            type="number"
+                            min="0"
+                            max="2000"
+                            step="10"
+                            style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                            .value=${String(this.currentDuckReleaseMs)}
+                            .disabled=${!this.currentAudioDuckingEnabled}
+                            aria-describedby="duck-release-help"
+                            @input=${(e: Event) => {
+                              if (e.target instanceof HTMLInputElement) {
+                                const v = Number(e.target.value);
+                                if (Number.isFinite(v)) {
+                                  this.currentDuckReleaseMs = Math.max(0, Math.min(2000, v));
+                                }
+                              }
+                            }} />
+                          <div id="duck-release-help" class="help-text" style="margin-top: 4px;">
+                            Ramp-up time after each cue ends (default: 150ms).
+                          </div>
+                        </div>
+
+                        <div>
+                          <label for="duck-hold-ms">
+                            Hold / Tail Time (ms):
+                          </label>
+                          <input
+                            id="duck-hold-ms"
+                            type="number"
+                            min="0"
+                            max="2000"
+                            step="10"
+                            style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                            .value=${String(this.currentDuckHoldMs)}
+                            .disabled=${!this.currentAudioDuckingEnabled}
+                            aria-describedby="duck-hold-help"
+                            @input=${(e: Event) => {
+                              if (e.target instanceof HTMLInputElement) {
+                                const v = Number(e.target.value);
+                                if (Number.isFinite(v)) {
+                                  this.currentDuckHoldMs = Math.max(0, Math.min(2000, v));
+                                }
+                              }
+                            }} />
+                          <div id="duck-hold-help" class="help-text" style="margin-top: 4px;">
+                            Hold duration after a cue finishes (default: 150ms).
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

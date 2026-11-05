@@ -213,6 +213,17 @@ export const TTS_VOICES: Record<string, {name: string, label: string}[]> = {
   'ja-JP': ALL_VOICES,
 };
 
+/** Whether audio ducking is enabled by default during AD narration and export. */
+export const DEFAULT_AUDIO_DUCKING_ENABLED = true;
+/** Default ducked video volume percentage (0-100) while AD narration is playing. */
+export const DEFAULT_DUCK_VOLUME_PERCENT = 35;
+/** Default fade-down (attack) duration in milliseconds before AD narration starts. */
+export const DEFAULT_DUCK_ATTACK_MS = 50;
+/** Default fade-up (release) duration in milliseconds after AD narration ends. */
+export const DEFAULT_DUCK_RELEASE_MS = 150;
+/** Default hold/tail time in milliseconds after a cue finishes before restoring volume. */
+export const DEFAULT_DUCK_HOLD_MS = 150;
+
 /** Threshold for audio speed adjustment. If the required speed is higher than this, it's considered high speed. */
 export const HIGH_SPEED_SCALE_THRESHOLD = 4;
 /** The assumed number of words spoken per second, used for estimating audio duration. */

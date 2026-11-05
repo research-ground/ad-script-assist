@@ -23,6 +23,7 @@ interface YTPlayer {
   pauseVideo(): void;
   stopVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
+  setVolume(volume: number): void;
   getDuration(): number;
   getCurrentTime(): number;
   getPlayerState(): number;
@@ -255,6 +256,14 @@ export class YouTubeAdapter extends EventTarget implements VideoPlayerApi {
       const clampedTime = Math.max(0, Math.min(time, this.durationValue));
       this.player.seekTo(clampedTime, true);
       this.currentTimeValue = clampedTime;
+    }
+  }
+
+  /** Accepts a 0-1 volume and maps it to YouTube's 0-100 integer scale. */
+  setVolume(volume: number) {
+    if (this.player && typeof this.player.setVolume === 'function') {
+      const clamped = Math.max(0, Math.min(1, volume));
+      this.player.setVolume(Math.round(clamped * 100));
     }
   }
 

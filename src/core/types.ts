@@ -95,6 +95,7 @@ export interface VideoPlayerApi {
   play(): Promise<void>;
   pause(): void;
   seek(time: number): void;
+  setVolume?(volume: number): void;
   addEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject,

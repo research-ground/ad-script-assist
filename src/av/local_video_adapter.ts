@@ -84,6 +84,10 @@ export class LocalVideoAdapter implements VideoPlayerApi {
     this.videoElement.currentTime = time;
   }
 
+  setVolume(volume: number): void {
+    this.videoElement.volume = Math.max(0, Math.min(1, volume));
+  }
+
   addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {
     this.videoElement.addEventListener(type, listener, options);
   }

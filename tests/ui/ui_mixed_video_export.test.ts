@@ -19,6 +19,7 @@ import * as assert from 'node:assert';
 import fs from 'fs';
 import path from 'path';
 import {ALL_FORMATS, BufferSource, Input} from 'mediabunny';
+import {applyDuckingEnvelope, detectSpeechSpans} from '../../src/av/mediabunny_video_exporter';
 import {setupUITest, teardownUITest, uploadLocalVideo} from './ui_test_utils';
 
 const LOCAL_VIDEO = 'tests/test_data/test_video.mp4';
@@ -101,4 +102,48 @@ test('Export Mixed Video produces an MP4 with the original video and an AAC mix'
   } finally {
     await teardownUITest();
   }
+});
+
+test('applyDuckingEnvelope ducks background audio to 35% during active AD speech and restores to 100%', () => {
+  const sampleRate = 1000;
+  const length = 3000; // 3 seconds
+  const bgData = new Float32Array(length).fill(1.0);
+  const adData = new Float32Array(length).fill(0.0);
+  // Active speech between 1.0s and 2.0s
+  for (let i = 1000; i < 2000; i++) {
+    adData[i] = 0.5;
+  }
+
+  const bgBuf = {
+    sampleRate,
+    length,
+    numberOfChannels: 1,
+    getChannelData: () => bgData,
+  };
+  const adBuf = {
+    sampleRate,
+    length,
+    numberOfChannels: 1,
+    getChannelData: () => adData,
+  };
+
+  const spans = detectSpeechSpans(adBuf, 0.3);
+  assert.strictEqual(spans.length, 1);
+  assert.ok(Math.abs(spans[0].start - 1.0) < 0.05);
+  assert.ok(Math.abs(spans[0].end - 2.0) < 0.05);
+
+  applyDuckingEnvelope(bgBuf, adBuf, {
+    enabled: true,
+    duckVolumePercent: 35,
+    attackMs: 50,
+    releaseMs: 150,
+    holdMs: 150,
+  });
+
+  // Before attack (0.5s): untouched at 1.0
+  assert.strictEqual(bgData[500], 1.0);
+  // Mid-speech (1.5s): ducked to 0.35
+  assert.ok(Math.abs(bgData[1500] - 0.35) < 0.001, `Expected 0.35 at 1.5s, got ${bgData[1500]}`);
+  // After hold + release (2.5s): restored to 1.0
+  assert.strictEqual(bgData[2500], 1.0);
 });

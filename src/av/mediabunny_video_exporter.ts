@@ -37,7 +37,14 @@ import {
 } from 'mediabunny';
 import type {InputAudioTrack} from 'mediabunny';
 
-import type {MixedVideoExportRequest, VideoExporter} from './video_exporter';
+import {
+  DEFAULT_AUDIO_DUCKING_ENABLED,
+  DEFAULT_DUCK_ATTACK_MS,
+  DEFAULT_DUCK_HOLD_MS,
+  DEFAULT_DUCK_RELEASE_MS,
+  DEFAULT_DUCK_VOLUME_PERCENT,
+} from '../core/constants';
+import type {AudioDuckingOptions, MixedVideoExportRequest, VideoExporter} from './video_exporter';
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
@@ -50,7 +57,7 @@ export class MediabunnyVideoExporter implements VideoExporter {
     return canEncodeAudio('aac', {numberOfChannels: CHANNELS, sampleRate: SAMPLE_RATE, quality: QUALITY});
   }
 
-  async exportMixedVideo({video, adTrack, onProgress}: MixedVideoExportRequest): Promise<Blob> {
+  async exportMixedVideo({video, adTrack, ducking, onProgress}: MixedVideoExportRequest): Promise<Blob> {
     const input = new Input({source: new BlobSource(video), formats: ALL_FORMATS});
     const output = new Output({format: new Mp4OutputFormat(), target: new BufferTarget()});
 
@@ -58,7 +65,7 @@ export class MediabunnyVideoExporter implements VideoExporter {
     const conversion = await Conversion.init({input, output, audio: {discard: true}, composable: true});
     if (onProgress) conversion.onProgress = onProgress;
 
-    const soundtrack = await mixSoundtrack(input, adTrack);
+    const soundtrack = await mixSoundtrack(input, adTrack, ducking);
     const audioSource = new AudioBufferSource({codec: 'aac', quality: QUALITY});
     output.addAudioTrack(audioSource);
 
@@ -71,14 +78,157 @@ export class MediabunnyVideoExporter implements VideoExporter {
   }
 }
 
+/**
+ * Detects non-silent AD speech intervals (in seconds) within `adBuffer`,
+ * merging adjacent spans separated by less than `mergeGapSec`.
+ * @visibleForTesting
+ */
+export function detectSpeechSpans(
+  adBuffer: Pick<AudioBuffer, 'sampleRate' | 'length' | 'numberOfChannels' | 'getChannelData'>,
+  mergeGapSec = 0.3,
+): Array<{start: number; end: number}> {
+  const sr = adBuffer.sampleRate;
+  const numFrames = adBuffer.length;
+  const numChannels = adBuffer.numberOfChannels;
+  if (sr <= 0 || numFrames <= 0 || numChannels <= 0) return [];
+
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < numChannels; c++) {
+    channels.push(adBuffer.getChannelData(c));
+  }
+
+  const winFrames = Math.max(1, Math.floor(0.02 * sr)); // 20ms analysis window
+  const numWins = Math.ceil(numFrames / winFrames);
+  const spans: Array<{start: number; end: number}> = [];
+  let inSpan = false;
+  let startT = 0;
+
+  for (let w = 0; w < numWins; w++) {
+    const fStart = w * winFrames;
+    const fEnd = Math.min(numFrames, fStart + winFrames);
+    let peak = 0;
+    for (let c = 0; c < numChannels; c++) {
+      const chData = channels[c];
+      for (let f = fStart; f < fEnd; f++) {
+        const abs = Math.abs(chData[f]);
+        if (abs > peak) peak = abs;
+      }
+    }
+    const active = peak > 0.005;
+    const t = fStart / sr;
+    if (active && !inSpan) {
+      inSpan = true;
+      startT = t;
+    } else if (!active && inSpan) {
+      inSpan = false;
+      const endT = t;
+      if (spans.length > 0 && startT - spans[spans.length - 1].end < mergeGapSec) {
+        spans[spans.length - 1].end = endT;
+      } else {
+        spans.push({start: startT, end: endT});
+      }
+    }
+  }
+
+  if (inSpan) {
+    const endT = numFrames / sr;
+    if (spans.length > 0 && startT - spans[spans.length - 1].end < mergeGapSec) {
+      spans[spans.length - 1].end = endT;
+    } else {
+      spans.push({start: startT, end: endT});
+    }
+  }
+
+  return spans;
+}
+
+/**
+ * Applies a smooth attack/hold/release ducking gain envelope to `bgBuffer` in-place
+ * wherever `adBuffer` contains active speech.
+ * @visibleForTesting
+ */
+export function applyDuckingEnvelope(
+  bgBuffer: Pick<AudioBuffer, 'sampleRate' | 'length' | 'numberOfChannels' | 'getChannelData'>,
+  adBuffer: Pick<AudioBuffer, 'sampleRate' | 'length' | 'numberOfChannels' | 'getChannelData'>,
+  options?: AudioDuckingOptions,
+): void {
+  const enabled = options?.enabled ?? DEFAULT_AUDIO_DUCKING_ENABLED;
+  if (!enabled) return;
+
+  const duckVolume = Math.max(
+    0,
+    Math.min(1, (options?.duckVolumePercent ?? DEFAULT_DUCK_VOLUME_PERCENT) / 100),
+  );
+  if (duckVolume >= 1) return;
+
+  const attackSec = Math.max(0, (options?.attackMs ?? DEFAULT_DUCK_ATTACK_MS) / 1000);
+  const releaseSec = Math.max(0, (options?.releaseMs ?? DEFAULT_DUCK_RELEASE_MS) / 1000);
+  const holdSec = Math.max(0, (options?.holdMs ?? DEFAULT_DUCK_HOLD_MS) / 1000);
+
+  const spans = detectSpeechSpans(adBuffer, Math.max(0.3, holdSec));
+  if (spans.length === 0) return;
+
+  const sr = bgBuffer.sampleRate;
+  const numFrames = bgBuffer.length;
+  const env = new Float32Array(numFrames);
+  env.fill(1.0);
+
+  const attackFrames = Math.round(attackSec * sr);
+  const releaseFrames = Math.round(releaseSec * sr);
+  const holdFrames = Math.round(holdSec * sr);
+
+  for (const span of spans) {
+    const sIdx = Math.max(0, Math.min(numFrames, Math.round(span.start * sr)));
+    const eIdx = Math.max(sIdx, Math.min(numFrames, Math.round(span.end * sr) + holdFrames));
+
+    for (let f = sIdx; f < eIdx; f++) {
+      if (duckVolume < env[f]) env[f] = duckVolume;
+    }
+
+    if (attackFrames > 0) {
+      const aStart = Math.max(0, sIdx - attackFrames);
+      const aLen = Math.max(1, sIdx - aStart);
+      for (let f = aStart; f < sIdx; f++) {
+        const g = 1.0 - (1.0 - duckVolume) * ((f - aStart) / aLen);
+        if (g < env[f]) env[f] = g;
+      }
+    }
+
+    if (releaseFrames > 0) {
+      const rEnd = Math.min(numFrames, eIdx + releaseFrames);
+      const rLen = Math.max(1, rEnd - eIdx);
+      for (let f = eIdx; f < rEnd; f++) {
+        const g = duckVolume + (1.0 - duckVolume) * ((f - eIdx) / rLen);
+        if (g < env[f]) env[f] = g;
+      }
+    }
+  }
+
+  for (let c = 0; c < bgBuffer.numberOfChannels; c++) {
+    const chData = bgBuffer.getChannelData(c);
+    for (let f = 0; f < numFrames; f++) {
+      chData[f] *= env[f];
+    }
+  }
+}
+
 /** Renders the original audio (if any) and the AD track into one buffer. */
-async function mixSoundtrack(input: Input, adTrack: Blob): Promise<AudioBuffer> {
+async function mixSoundtrack(
+  input: Input,
+  adTrack: Blob,
+  ducking?: AudioDuckingOptions,
+): Promise<AudioBuffer> {
   const duration = await input.computeDuration();
   const ctx = new OfflineAudioContext(CHANNELS, Math.ceil(duration * SAMPLE_RATE), SAMPLE_RATE);
 
+  const adBuffer = await ctx.decodeAudioData(await adTrack.arrayBuffer());
   const audioTrack = await input.getPrimaryAudioTrack();
-  if (audioTrack) play(ctx, await decodeTrack(audioTrack));
-  play(ctx, await ctx.decodeAudioData(await adTrack.arrayBuffer()));
+  if (audioTrack) {
+    const bgBuffer = await decodeTrack(audioTrack);
+    applyDuckingEnvelope(bgBuffer, adBuffer, ducking);
+    play(ctx, bgBuffer);
+  }
+  play(ctx, adBuffer);
 
   return ctx.startRendering();
 }

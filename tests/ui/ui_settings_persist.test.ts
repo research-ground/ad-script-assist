@@ -50,6 +50,19 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
     el.dispatchEvent(new Event('change'));
   });
 
+  // Change Audio Ducking parameters
+  const duckVolInput = await page.locator('main-page >>> settings-modal >>> #duck-volume-percent').waitHandle();
+  await duckVolInput.evaluate((el: HTMLInputElement) => {
+    el.value = '20';
+    el.dispatchEvent(new Event('input'));
+  });
+
+  const duckAttackInput = await page.locator('main-page >>> settings-modal >>> #duck-attack-ms').waitHandle();
+  await duckAttackInput.evaluate((el: HTMLInputElement) => {
+    el.value = '80';
+    el.dispatchEvent(new Event('input'));
+  });
+
   // Change first Hotkey
   const hotkeyInput = await page.locator('main-page >>> settings-modal >>> .hotkey-input-keycombo').waitHandle();
   await hotkeyInput.evaluate((el: HTMLInputElement) => {
@@ -91,6 +104,18 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
     return modal?.shadowRoot?.querySelector<HTMLInputElement>('.hotkey-input-keycombo')?.value;
   });
   if (savedHotkey !== 'Ctrl+Shift+Z') throw new Error(`Hotkey didn't persist! Got: ${savedHotkey}`);
+
+  const savedDuckVol = await page.evaluate(() => {
+    const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
+    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#duck-volume-percent')?.value;
+  });
+  if (savedDuckVol !== '20') throw new Error(`Duck volume didn't persist! Got: ${savedDuckVol}`);
+
+  const savedDuckAttack = await page.evaluate(() => {
+    const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
+    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#duck-attack-ms')?.value;
+  });
+  if (savedDuckAttack !== '80') throw new Error(`Duck attack didn't persist! Got: ${savedDuckAttack}`);
   console.log('✅ Settings persisted successfully');
 
   // Reset Settings
@@ -133,6 +158,12 @@ async function runSettingsTest(page: Page, useKeyboard: boolean) {
     return modal?.shadowRoot?.querySelector<HTMLSelectElement>('#language-select')?.value;
   });
   if (resetLang !== 'en-US') throw new Error(`Language didn't reset! Got: ${resetLang}`);
+
+  const resetDuckVol = await page.evaluate(() => {
+    const modal = document.querySelector('main-page')?.shadowRoot?.querySelector('settings-modal');
+    return modal?.shadowRoot?.querySelector<HTMLInputElement>('#duck-volume-percent')?.value;
+  });
+  if (resetDuckVol !== '35') throw new Error(`Duck volume didn't reset to 35%! Got: ${resetDuckVol}`);
   console.log('✅ Settings reset successfully');
 }
 

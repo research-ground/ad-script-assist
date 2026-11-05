@@ -257,6 +257,11 @@ export class AdVideoPlayer extends LitElement implements VideoPlayerApi {
     this.adapter?.seek(time);
   }
 
+  /** Sets the player output volume, 0.0 (silent) to 1.0 (full). */
+  setVolume(volume: number) {
+    this.adapter?.setVolume?.(volume);
+  }
+
   /** Returns the audio/video element for playing media, here the component itself. */
   get nativeVideoElement(): this {
     return this;

@@ -20,12 +20,28 @@
  * (currently Mediabunny) can be swapped without touching the rest of the app.
  */
 
+/** Parameters controlling background audio ducking during AD narration. */
+export interface AudioDuckingOptions {
+  /** Whether audio ducking is enabled. Defaults to true. */
+  enabled?: boolean;
+  /** Target background volume percentage (0-100) while AD narration plays. Defaults to 35. */
+  duckVolumePercent?: number;
+  /** Fade-down (attack) duration in milliseconds before AD narration starts. Defaults to 50. */
+  attackMs?: number;
+  /** Fade-up (release) duration in milliseconds after AD narration ends. Defaults to 150. */
+  releaseMs?: number;
+  /** Hold/tail duration in milliseconds after AD narration ends before restoring volume. Defaults to 150. */
+  holdMs?: number;
+}
+
 /** Inputs for a mixed-video export. */
 export interface MixedVideoExportRequest {
   /** The original local video file. */
   video: Blob;
   /** The compiled AD audio track (e.g. from compileADAudioTrack), aligned to t=0. */
   adTrack: Blob;
+  /** Optional audio ducking configuration. */
+  ducking?: AudioDuckingOptions;
   /** Called with export progress from 0 to 1. */
   onProgress?: (fraction: number) => void;
 }
