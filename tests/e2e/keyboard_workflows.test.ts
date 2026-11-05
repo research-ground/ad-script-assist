@@ -92,20 +92,52 @@ async function waitForAgentResponse(page: Page) {
   }, { timeout: 120000 });
 }
 
-// Helper to wait for AD speech generation to complete
+// Helper to wait for AD speech generation to complete. Local Kokoro TTS runs on
+// WASM in headless Chrome (no WebGPU), so voicing a full AI-generated script can
+// take several minutes.
 async function waitForSpeechGeneration(page: Page) {
   await page.waitForFunction(() => {
     const state = (window as any).appState;
     if (!state || state.get('isAdAudioGenerating')) return false;
     const segs = (state.get('adSegments') || []).filter((s: any) => s.script && s.script.trim().length > 0);
     return segs.every((s: any) => Boolean(s.audioData) || Boolean(s.generationFailed));
-  }, { timeout: 120000 });
+  }, { timeout: 300000 });
 }
 
 async function getSegmentsSummary(page: Page): Promise<string> {
   return page.evaluate(() => {
     const segs = (window as any).appState?.get('adSegments') || [];
     return segs.map((s: any) => s.script).join('\n');
+  });
+}
+
+// Editor helpers. Platform shortcuts such as Meta+A or Meta+ArrowDown are not
+// translated into editing commands in headless Chrome on macOS, so send the
+// underlying editing commands explicitly.
+async function selectAllInEditor(page: Page) {
+  await page.keyboard.press('a', { commands: ['SelectAll'] });
+}
+
+async function moveToEditorEnd(page: Page) {
+  await page.keyboard.press('End', { commands: ['MoveToEndOfDocument'] });
+}
+
+/** Selects the full text of the line `linesUp` lines above the last line. */
+async function selectLineFromEnd(page: Page, linesUp: number) {
+  await moveToEditorEnd(page);
+  for (let i = 0; i < linesUp; i++) {
+    await page.keyboard.press('ArrowUp');
+  }
+  await page.keyboard.press('End', { commands: ['MoveToEndOfLine'] });
+  await page.keyboard.press('Home', {
+    commands: ['MoveToBeginningOfLineAndModifySelection'],
+  });
+}
+
+async function getEditorText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const adTextArea = document.querySelector('main-page')?.shadowRoot?.querySelector('ad-text-area');
+    return (adTextArea as any)?.value || '';
   });
 }
 
@@ -117,8 +149,10 @@ async function clearAppState(page: Page) {
   await page.reload({ waitUntil: 'networkidle0' });
 }
 
-const geminiKey = process.env.GEMINI_API_KEY || 'mock_gemini_key';
-const openaiKey = process.env.OPENAI_API_KEY || 'mock_openai_key';
+// Only override keys from the environment; otherwise the app uses the
+// server-side keys from models.conf (exposed as __SERVER_KEY placeholders).
+const geminiKey = process.env.GEMINI_API_KEY || '';
+const openaiKey = process.env.OPENAI_API_KEY || '';
 
 test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
   const page = await setupUITest();
@@ -129,7 +163,7 @@ test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
     console.log('1. Configuring Gemini provider & key via server config state');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'gemini');
-      (window as any).appState.set('geminiApiKey', key);
+      if (key) (window as any).appState.set('geminiApiKey', key);
     }, geminiKey);
     console.log('✅ Provider & key configured');
 
@@ -181,9 +215,7 @@ test('Workflow 1: Local file + Gemini (Keyboard navigation)', async (t) => {
     console.log('5. Editing AD script via keyboard');
     await pressHotkey(page, '5'); // ctrl+5 to focus editor
     // Clear and type new script
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nKeyboard Edit Test.\n');
     await pressHotkey(page, '4'); // focus out to blur and sync
@@ -254,7 +286,7 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
     console.log('1. Configuring OpenAI provider & key via server config state');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'openai');
-      (window as any).appState.set('openaiApiKey', key);
+      if (key) (window as any).appState.set('openaiApiKey', key);
     }, openaiKey);
     console.log('✅ Provider & key configured');
 
@@ -305,9 +337,7 @@ test('Workflow 2: Local file + ChatGPT (Keyboard navigation)', async (t) => {
 
     console.log('5. Editing AD script via keyboard');
     await pressHotkey(page, '5');
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nKeyboard ChatGPT Edit.\n');
     await pressHotkey(page, '4');
@@ -344,7 +374,7 @@ test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
     console.log('1. Configuring Gemini provider & key via server config state');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'gemini');
-      (window as any).appState.set('geminiApiKey', key);
+      if (key) (window as any).appState.set('geminiApiKey', key);
     }, geminiKey);
     console.log('✅ Provider & key configured');
 
@@ -387,9 +417,7 @@ test('Workflow 3: YouTube + Gemini (Keyboard navigation)', async (t) => {
 
     console.log('5. Editing AD script');
     await pressHotkey(page, '5');
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nKeyboard YouTube Edit.\n');
     await pressHotkey(page, '4');
@@ -414,7 +442,7 @@ test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (
     console.log('1. Configuring API Key and loading YouTube Video');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'gemini');
-      (window as any).appState.set('geminiApiKey', key);
+      if (key) (window as any).appState.set('geminiApiKey', key);
     }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -437,9 +465,7 @@ test('Workflow 4: Reload test (YT + Gemini only) (Keyboard navigation)', async (
 
     // Edit script text so it is unique and we can verify it persisted
     await pressHotkey(page, '5');
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:02.000 --> 00:00:06.000\nReload Persistence Test.\n');
     await pressHotkey(page, '4');
@@ -486,7 +512,7 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     console.log('1. Configuring API Key and loading YouTube Video');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'gemini');
-      (window as any).appState.set('geminiApiKey', key);
+      if (key) (window as any).appState.set('geminiApiKey', key);
     }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -504,9 +530,7 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
 
     console.log('2. Editing script: inserting initial WebVTT');
     await pressHotkey(page, '5');
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nLine 1\n\n00:00:06.000 --> 00:00:10.000\nLine 2\n');
     await pressHotkey(page, '4'); // blur to sync
@@ -518,9 +542,7 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
     console.log('4. Editing script: adding Line 3 at the end');
     await pressHotkey(page, '5');
     // Move to end of file and type
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.up('Meta');
+    await moveToEditorEnd(page);
     await page.keyboard.type('\n00:00:11.000 --> 00:00:15.000\nLine 3\n');
     await pressHotkey(page, '4'); // blur
     await new Promise(r => setTimeout(r, 1000));
@@ -530,13 +552,8 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
 
     console.log('5. Editing script: modifying Line 2 text');
     await pressHotkey(page, '5');
-    // Move up to Line 2 line, delete text, type Line 2 Edited
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.down('Shift');
-    await page.keyboard.press('Home');
-    await page.keyboard.up('Shift');
+    // Select the \"Line 2\" text line (4 lines above the empty last line)
+    await selectLineFromEnd(page, 4);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('Line 2 Edited');
     await pressHotkey(page, '4'); // blur
@@ -547,22 +564,19 @@ test('Workflow 5: Script editing test (YT + Gemini only) (Keyboard navigation)',
 
     console.log('6. Editing script: breaking syntax of Line 1');
     await pressHotkey(page, '5');
-    // Move up to Line 1 timestamp, break it
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.down('Shift');
-    await page.keyboard.press('Home');
-    await page.keyboard.up('Shift');
+    // Select Line 1's timestamp line (8 lines above the empty last line)
+    await selectLineFromEnd(page, 8);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('00:00:01.000'); // missing end time and -->
     await pressHotkey(page, '4'); // blur
     await new Promise(r => setTimeout(r, 1000));
 
     segsText = await getSegmentsSummary(page);
-    assert.ok(!segsText.includes('Line 1'), 'Line 1 must be removed from segments list due to syntax error');
+    const editorAfterBreak = await getEditorText(page);
+    assert.ok(
+      !segsText.includes('Line 1'),
+      `Line 1 must be removed from segments list due to syntax error. Editor:\n${editorAfterBreak}`,
+    );
     assert.ok(segsText.includes('Line 2 Edited') && segsText.includes('Line 3'), 'Other segments must remain');
 
     console.log('✅ Workflow 5 Passed!');
@@ -580,7 +594,7 @@ test('Workflow 6: Keyboard focus test (YT + Gemini only) (Keyboard navigation)',
     console.log('1. Configuring API Key and loading YouTube Video');
     await page.evaluate((key) => {
       (window as any).appState.set('llmProvider', 'gemini');
-      (window as any).appState.set('geminiApiKey', key);
+      if (key) (window as any).appState.set('geminiApiKey', key);
     }, geminiKey);
 
     await keyboardActivate(page, 'main-page >>> top-bar >>> button[aria-label="Add Video"]');
@@ -598,9 +612,7 @@ test('Workflow 6: Keyboard focus test (YT + Gemini only) (Keyboard navigation)',
 
     console.log('2. Setting script in editor');
     await pressHotkey(page, '5');
-    await page.keyboard.down('Meta');
-    await page.keyboard.press('A');
-    await page.keyboard.up('Meta');
+    await selectAllInEditor(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.type('WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nLine 1 Text.\n\n00:00:06.000 --> 00:00:10.000\nLine 2 Text.\n');
     await pressHotkey(page, '4'); // blur to sync
