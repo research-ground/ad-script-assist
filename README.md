@@ -1,5 +1,5 @@
-[!NOTE]
-This is a work in progress and not yet ready for use by the general public. More info will be available soon.
+> [!NOTE]
+> This is a work in progress and not yet ready for use by the general public. More info will be available soon.
 
 # AD Script Assist
 
