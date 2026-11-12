@@ -1,3 +1,6 @@
+[!NOTE]
+This is a work in progress and not yet ready for use by the general public. More info will be available soon.
+
 # AD Script Assist
 
 AD Script Assist is a web-based, AI-driven interactive helper for creating, editing, and mixing audio descriptions (AD) for videos. It helps users generate initial AD scripts and refine them through a natural language chat interface with an AI agent, or use the editor directly as a standalone WebVTT audio description studio with on-device neural text-to-speech.
