@@ -22,6 +22,9 @@ import { validateApiKeyForProvider } from './describe_error';
 export function getOpenAIApiKey(): string {
   let apiKey = '';
   if (typeof window !== 'undefined') {
+    if (appState.get('useCustomOpenaiKey')) {
+      return (appState.get('userOpenaiApiKey') || '').trim();
+    }
     apiKey = appState.get('openaiApiKey') || '';
   } else if (typeof process !== 'undefined' && process.env) {
     apiKey = process.env.OPENAI_API_KEY || '';
@@ -72,7 +75,7 @@ export class OpenAIRequest {
         apiKey = getOpenAIApiKey().trim();
       }
       if (!apiKey) {
-        throw new Error('No OpenAI API key configured. Please add openai_api_key in models.conf.');
+        throw new Error('No OpenAI API key configured. Open Settings to enter your own key, or add openai_api_key in models.conf.');
       }
       const keyMismatch = validateApiKeyForProvider(apiKey, 'openai', 'VLM');
       if (keyMismatch) {
@@ -80,7 +83,9 @@ export class OpenAIRequest {
       }
       const resolvedModel =
         modelName ||
-        (typeof window !== 'undefined' ? appState.get('openaiModel') : '') ||
+        (typeof window !== 'undefined'
+          ? appState.get('openaiModel') || appState.get('defaultOpenaiModel')
+          : '') ||
         DEFAULT_OPENAI_MODEL;
       const response = await proxiedFetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -131,7 +136,7 @@ export class OpenAIRequest {
     ytUrl: string,
     callback: (response: string) => void,
     onError: (error: unknown) => void,
-    model: string = 'gpt-4o',
+    model: string = DEFAULT_OPENAI_MODEL,
     data?: GeminiRequestPlusData,
   ) {
     throw new Error('OpenAI API does not natively support YouTube videos. Please use local videos or process YouTube videos externally.');
@@ -142,7 +147,7 @@ export class OpenAIRequest {
     frames: string[],
     callback: (response: string) => void,
     onError: (error: unknown) => void,
-    model: string = 'gpt-4o',
+    model: string = DEFAULT_OPENAI_MODEL,
     data?: GeminiRequestPlusData,
   ) {
     const messages = [

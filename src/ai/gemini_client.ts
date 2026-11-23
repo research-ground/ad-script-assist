@@ -45,6 +45,9 @@ export function resolveGeminiApiKey(): string {
       appState.set('geminiApiKey', urlKey);
       return urlKey;
     }
+    if (appState.get('useCustomGeminiKey')) {
+      return (appState.get('userGeminiApiKey') || '').trim();
+    }
     const stateKey = appState.get('geminiApiKey');
     if (stateKey) {
       return stateKey;
@@ -235,7 +238,7 @@ class GeminiRequest {
         resolvedKey = resolveGeminiApiKey();
       }
       if (!resolvedKey.trim()) {
-        throw new Error('No Gemini API key configured. Please add gemini_api_key in models.conf.');
+        throw new Error('No Gemini API key configured. Open Settings to enter your own key, or add gemini_api_key in models.conf.');
       }
       const keyMismatch = validateApiKeyForProvider(resolvedKey, 'gemini', 'VLM');
       if (keyMismatch) {

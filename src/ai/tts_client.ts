@@ -86,11 +86,15 @@ export async function generateTTS(
 
   const explicitTtsKey =
     typeof window !== 'undefined' ? (appState.get('ttsApiKey') || '').trim() : '';
-  const resolvedTtsKey =
-    explicitTtsKey ||
-    (ttsProvider === 'openai'
+  const providerKey =
+    ttsProvider === 'openai'
       ? (getOpenAIApiKey() || '').trim()
-      : (resolveGeminiApiKey() || '').trim());
+      : (resolveGeminiApiKey() || '').trim();
+  const resolvedTtsKey =
+    providerKey ||
+    (explicitTtsKey && !validateApiKeyForProvider(explicitTtsKey, ttsProvider, 'TTS')
+      ? explicitTtsKey
+      : '');
 
   // If no API key is configured for the selected cloud TTS provider, immediately fall back to local Kokoro TTS.
   if (!resolvedTtsKey) {
@@ -124,7 +128,9 @@ export async function generateTTS(
       if (ttsProvider === 'openai') {
         const openAiVoice = isOpenAIVoice(voiceName) ? voiceName : 'alloy';
         const openAiTtsModel =
-          (typeof window !== 'undefined' ? appState.get('openaiTtsModel') : '') ||
+          (typeof window !== 'undefined'
+            ? appState.get('openaiTtsModel') || appState.get('defaultOpenaiTtsModel')
+            : '') ||
           DEFAULT_OPENAI_TTS_MODEL;
         const response = await proxiedFetch('https://api.openai.com/v1/audio/speech', {
           method: 'POST',
@@ -157,7 +163,9 @@ export async function generateTTS(
         const geminiVoice = isGeminiVoice(voiceName) ? voiceName : 'Aoede';
         const response = await callGeminiGenerateContent(resolvedTtsKey, {
           model:
-            (typeof window !== 'undefined' ? appState.get('speechModel') : '') ||
+            (typeof window !== 'undefined'
+              ? appState.get('speechModel') || appState.get('defaultSpeechModel')
+              : '') ||
             DEFAULT_SPEECH_MODEL,
           contents: text,
           config: {

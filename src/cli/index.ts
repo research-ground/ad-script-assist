@@ -25,6 +25,7 @@ import { OpenAIRequest } from '../ai/openai_client';
 import { parseAgentResponse } from '../ai/agent_response_parser';
 import { PROMPTS } from '../ai/prompts';
 import { AdScriptParser, isValidWebVtt } from '../core/ad_script_parser';
+import { DEFAULT_OPENAI_MODEL } from '../core/constants';
 import { extractFrames, requireFfmpeg } from './video_utils';
 
 async function main() {
@@ -141,7 +142,7 @@ Options:
               frames,
               (response) => resolve(response),
               (error) => reject(error),
-              'gpt-4o',
+              DEFAULT_OPENAI_MODEL,
               { videoId }
             );
           } catch (err) {
@@ -164,7 +165,7 @@ Options:
             ytUrl,
             (response) => resolve(response),
             (error) => reject(error),
-            'gpt-4o',
+            DEFAULT_OPENAI_MODEL,
             { videoId }
           );
         }

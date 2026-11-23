@@ -70,6 +70,12 @@ export interface AppState {
 
   // Server-configured Provider, Model & Key State (from models.conf via GET /api/config)
   hasServerProxy: boolean;
+  serverGeminiApiKey: string;
+  serverOpenaiApiKey: string;
+  userGeminiApiKey: string;
+  userOpenaiApiKey: string;
+  useCustomGeminiKey: boolean;
+  useCustomOpenaiKey: boolean;
   geminiApiKey: string;
   openaiApiKey: string;
   llmProvider: 'gemini' | 'openai' | 'none';
@@ -77,10 +83,14 @@ export interface AppState {
   ttsProvider: 'gemini' | 'openai' | 'kokoro';
   ttsApiKey: string;
   ttsLanguage: string;
-  agentModel: string; // '' = DEFAULT_AGENT_MODEL
-  openaiModel: string; // '' = DEFAULT_OPENAI_MODEL
-  speechModel: string; // '' = DEFAULT_SPEECH_MODEL
-  openaiTtsModel: string; // '' = DEFAULT_OPENAI_TTS_MODEL
+  defaultAgentModel: string;
+  defaultOpenaiModel: string;
+  defaultSpeechModel: string;
+  defaultOpenaiTtsModel: string;
+  agentModel: string; // '' = defaultAgentModel / DEFAULT_AGENT_MODEL
+  openaiModel: string; // '' = defaultOpenaiModel / DEFAULT_OPENAI_MODEL
+  speechModel: string; // '' = defaultSpeechModel / DEFAULT_SPEECH_MODEL
+  openaiTtsModel: string; // '' = defaultOpenaiTtsModel / DEFAULT_OPENAI_TTS_MODEL
 
   // Audio Ducking User Settings
   audioDuckingEnabled: boolean;
@@ -102,8 +112,17 @@ export interface AppState {
 type StateListener<T> = (value: T) => void;
 
 const USER_SETTINGS_KEYS = [
+  'llmProvider',
+  'userGeminiApiKey',
+  'userOpenaiApiKey',
+  'useCustomGeminiKey',
+  'useCustomOpenaiKey',
   'ttsProvider',
   'ttsLanguage',
+  'agentModel',
+  'openaiModel',
+  'speechModel',
+  'openaiTtsModel',
   'audioDuckingEnabled',
   'duckVolumePercent',
   'duckAttackMs',
@@ -181,6 +200,12 @@ class AppStateManager {
     editorCursorLine: 1,
 
     hasServerProxy: false,
+    serverGeminiApiKey: '',
+    serverOpenaiApiKey: '',
+    userGeminiApiKey: '',
+    userOpenaiApiKey: '',
+    useCustomGeminiKey: false,
+    useCustomOpenaiKey: false,
     geminiApiKey: '',
     openaiApiKey: '',
     llmProvider: 'gemini',
@@ -188,10 +213,14 @@ class AppStateManager {
     ttsProvider: 'kokoro',
     ttsApiKey: '',
     ttsLanguage: 'en-US',
-    agentModel: DEFAULT_AGENT_MODEL,
-    openaiModel: DEFAULT_OPENAI_MODEL,
-    speechModel: DEFAULT_SPEECH_MODEL,
-    openaiTtsModel: DEFAULT_OPENAI_TTS_MODEL,
+    defaultAgentModel: DEFAULT_AGENT_MODEL,
+    defaultOpenaiModel: DEFAULT_OPENAI_MODEL,
+    defaultSpeechModel: DEFAULT_SPEECH_MODEL,
+    defaultOpenaiTtsModel: DEFAULT_OPENAI_TTS_MODEL,
+    agentModel: '',
+    openaiModel: '',
+    speechModel: '',
+    openaiTtsModel: '',
 
     audioDuckingEnabled: DEFAULT_AUDIO_DUCKING_ENABLED,
     duckVolumePercent: DEFAULT_DUCK_VOLUME_PERCENT,
@@ -211,16 +240,36 @@ class AppStateManager {
   } = {};
 
   constructor() {
-    // Load User Settings from localStorage immediately (only non-secret UI preferences)
+    // Load User Settings from localStorage immediately
     if (
       typeof localStorage !== 'undefined' &&
       typeof localStorage.getItem === 'function'
     ) {
       const injectedKey = getInjectedGeminiApiKey();
       if (injectedKey) {
+        this.state.serverGeminiApiKey = injectedKey;
         this.state.geminiApiKey = injectedKey;
-        this.state.llmProvider = 'gemini';
       }
+      const savedLlmProvider = localStorage.getItem(
+        'userSettings_llmProvider',
+      ) as 'gemini' | 'openai' | 'none' | null;
+      if (
+        savedLlmProvider === 'gemini' ||
+        savedLlmProvider === 'openai' ||
+        savedLlmProvider === 'none'
+      ) {
+        this.state.llmProvider = savedLlmProvider;
+      }
+      this.state.userGeminiApiKey =
+        localStorage.getItem('userSettings_userGeminiApiKey') || '';
+      this.state.userOpenaiApiKey =
+        localStorage.getItem('userSettings_userOpenaiApiKey') || '';
+      this.state.useCustomGeminiKey =
+        localStorage.getItem('userSettings_useCustomGeminiKey') === 'true';
+      this.state.useCustomOpenaiKey =
+        localStorage.getItem('userSettings_useCustomOpenaiKey') === 'true';
+      this.syncEffectiveApiKeys();
+
       const savedTtsProvider = localStorage.getItem(
         'userSettings_ttsProvider',
       ) as 'gemini' | 'openai' | 'kokoro' | null;
@@ -233,6 +282,14 @@ class AppStateManager {
       }
       this.state.ttsLanguage =
         localStorage.getItem('userSettings_ttsLanguage') || 'en-US';
+      this.state.agentModel =
+        localStorage.getItem('userSettings_agentModel') || '';
+      this.state.openaiModel =
+        localStorage.getItem('userSettings_openaiModel') || '';
+      this.state.speechModel =
+        localStorage.getItem('userSettings_speechModel') || '';
+      this.state.openaiTtsModel =
+        localStorage.getItem('userSettings_openaiTtsModel') || '';
 
       const savedDuckEnabled = localStorage.getItem('userSettings_audioDuckingEnabled');
       if (savedDuckEnabled !== null) {
@@ -326,9 +383,31 @@ class AppStateManager {
 
     this.set('hasServerProxy', false);
     const fallbackKey = getStaticFallbackGeminiKey();
-    if (fallbackKey && !this.state.geminiApiKey) {
-      this.set('geminiApiKey', fallbackKey);
-      this.set('ttsApiKey', fallbackKey);
+    if (fallbackKey && !this.state.serverGeminiApiKey) {
+      this.set('serverGeminiApiKey', fallbackKey);
+    }
+  }
+
+  /**
+   * Recomputes active `geminiApiKey` and `openaiApiKey` based on whether a
+   * server-provided key is available and whether the user opted to use their
+   * own key.
+   */
+  syncEffectiveApiKeys(): void {
+    const effectiveGemini = this.state.useCustomGeminiKey
+      ? this.state.userGeminiApiKey.trim()
+      : this.state.serverGeminiApiKey || this.state.userGeminiApiKey.trim();
+    const effectiveOpenai = this.state.useCustomOpenaiKey
+      ? this.state.userOpenaiApiKey.trim()
+      : this.state.serverOpenaiApiKey || this.state.userOpenaiApiKey.trim();
+
+    if (this.state.geminiApiKey !== effectiveGemini) {
+      this.state.geminiApiKey = effectiveGemini;
+      this.notify('geminiApiKey', effectiveGemini);
+    }
+    if (this.state.openaiApiKey !== effectiveOpenai) {
+      this.state.openaiApiKey = effectiveOpenai;
+      this.notify('openaiApiKey', effectiveOpenai);
     }
   }
 
@@ -341,10 +420,18 @@ class AppStateManager {
     const models = sections['models'] || {};
     const keys = sections['keys'] || {};
 
-    const aiProv = (providers['ai_provider'] || 'gemini').toLowerCase();
-    const llmProvider: 'gemini' | 'openai' | 'none' =
-      aiProv === 'openai' ? 'openai' : aiProv === 'none' ? 'none' : 'gemini';
-    this.set('llmProvider', llmProvider);
+    const hasUserSavedLlmProvider =
+      typeof localStorage !== 'undefined' &&
+      typeof localStorage.getItem === 'function' &&
+      Boolean(localStorage.getItem('userSettings_llmProvider'));
+
+    if (!hasUserSavedLlmProvider) {
+      const aiProv = (providers['ai_provider'] || 'gemini').toLowerCase();
+      const llmProvider: 'gemini' | 'openai' | 'none' =
+        aiProv === 'openai' ? 'openai' : aiProv === 'none' ? 'none' : 'gemini';
+      this.state.llmProvider = llmProvider;
+      this.notify('llmProvider', llmProvider);
+    }
 
     const cloudTtsProv = (
       providers['cloud_tts_provider'] || 'gemini'
@@ -354,26 +441,24 @@ class AppStateManager {
     this.set('cloudTtsProvider', cloudTtsProvider);
 
     if (models['gemini_model']) {
-      this.set('agentModel', models['gemini_model']);
+      this.set('defaultAgentModel', models['gemini_model']);
     }
     if (models['openai_model']) {
-      this.set('openaiModel', models['openai_model']);
+      this.set('defaultOpenaiModel', models['openai_model']);
     }
     if (models['gemini_tts_model']) {
-      this.set('speechModel', models['gemini_tts_model']);
+      this.set('defaultSpeechModel', models['gemini_tts_model']);
     }
     if (models['openai_tts_model']) {
-      this.set('openaiTtsModel', models['openai_tts_model']);
+      this.set('defaultOpenaiTtsModel', models['openai_tts_model']);
     }
 
-    const geminiKey = keys['gemini_api_key'] || getInjectedGeminiApiKey() || '';
-    const openaiKey = keys['openai_api_key'] || '';
-    this.set('geminiApiKey', geminiKey);
-    this.set('openaiApiKey', openaiKey);
-
-    const activeCloudTtsKey =
-      cloudTtsProvider === 'openai' ? openaiKey : geminiKey;
-    this.set('ttsApiKey', activeCloudTtsKey);
+    const serverGeminiKey =
+      keys['gemini_api_key'] || getInjectedGeminiApiKey() || '';
+    const serverOpenaiKey = keys['openai_api_key'] || '';
+    this.set('serverGeminiApiKey', serverGeminiKey);
+    this.set('serverOpenaiApiKey', serverOpenaiKey);
+    this.syncEffectiveApiKeys();
 
     const hasUserSavedTtsProvider =
       typeof localStorage !== 'undefined' &&
@@ -388,8 +473,6 @@ class AppStateManager {
           : 'kokoro';
       this.state.ttsProvider = targetTtsProvider;
       this.notify('ttsProvider', targetTtsProvider);
-    } else if (this.state.ttsProvider !== 'kokoro') {
-      this.set('ttsProvider', cloudTtsProvider);
     }
 
     const validVoices = getVoicesForTtsProvider(this.state.ttsProvider);
@@ -409,6 +492,17 @@ class AppStateManager {
 
     this.state[key] = value;
     this.notify(key, value);
+
+    if (
+      key === 'serverGeminiApiKey' ||
+      key === 'serverOpenaiApiKey' ||
+      key === 'userGeminiApiKey' ||
+      key === 'userOpenaiApiKey' ||
+      key === 'useCustomGeminiKey' ||
+      key === 'useCustomOpenaiKey'
+    ) {
+      this.syncEffectiveApiKeys();
+    }
 
     // Auto-save User Settings
     if ((USER_SETTINGS_KEYS as readonly string[]).includes(key as string)) {

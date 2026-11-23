@@ -39,7 +39,7 @@ import { formatTimeForScreenReader, formatTimeForVttFull } from '../../core/time
 import { GeminiRequest } from '../../ai/gemini_client';
 import { OpenAIRequest } from '../../ai/openai_client';
 import { parseAgentResponse } from '../../ai/agent_response_parser';
-import { describeError } from '../../ai/describe_error';
+import { classifyServiceError, describeError } from '../../ai/describe_error';
 import { PROMPTS } from '../../ai/prompts';
 import {
   DEFAULT_AGENT_MODEL,
@@ -56,6 +56,7 @@ import {
 import { extractFramesFromVideoBlob } from '../utils/video_frame_extractor';
 import { getVideoExporter } from '../../av/video_exporter';
 import { showConfirm } from '../components/confirm_modal';
+import { showErrorModal } from '../components/error_modal';
 import type { AdSegment, AgentContext, AgentResponse, ConversationEntry, GeminiRequestPlusData, HotkeyConfigEntry } from '../../core/types';
 
 export class AppController {
@@ -681,8 +682,55 @@ export class AppController {
     };
   }
 
+  /**
+   * Returns a human-readable error message when the active VLM provider is
+   * disabled or has no API key configured (neither on the server nor in user
+   * settings), or `null` if requests can proceed.
+   */
+  public getMissingVlmKeyError(): string | null {
+    const provider = appState.get('llmProvider') || 'gemini';
+    if (provider === 'none') {
+      return 'Vision-Language Model (VLM) is set to None. Open Settings to select a VLM provider (Google Gemini or OpenAI ChatGPT) and configure an API key.';
+    }
+    if (provider === 'openai') {
+      const useCustom = Boolean(appState.get('useCustomOpenaiKey'));
+      const activeKey = useCustom
+        ? (appState.get('userOpenaiApiKey') || '').trim()
+        : (appState.get('openaiApiKey') || '').trim();
+      if (!activeKey) {
+        if (useCustom && appState.get('serverOpenaiApiKey')) {
+          return 'No custom OpenAI ChatGPT API key is set. Open Settings to enter your API key or switch back to the server-provided key.';
+        }
+        return 'No OpenAI ChatGPT API key is configured. Open Settings to enter your own API key, or configure openai_api_key on the server in models.conf.';
+      }
+      return null;
+    }
+
+    const useCustom = Boolean(appState.get('useCustomGeminiKey'));
+    const activeKey = useCustom
+      ? (appState.get('userGeminiApiKey') || '').trim()
+      : (appState.get('geminiApiKey') || getInjectedGeminiApiKey() || '').trim();
+    if (!activeKey) {
+      if (useCustom && appState.get('serverGeminiApiKey')) {
+        return 'No custom Google Gemini API key is set. Open Settings to enter your API key or switch back to the server-provided key.';
+      }
+      return 'No Google Gemini API key is configured. Open Settings to enter your own API key, or configure gemini_api_key on the server in models.conf.';
+    }
+    return null;
+  }
+
   public async generateAd() {
     if (!appState.get('isGenerateEnabled')) {
+      return;
+    }
+
+    const videoId = appState.get('currentVideoId');
+    const missingKeyErr = this.getMissingVlmKeyError();
+    if (missingKeyErr) {
+      appState.set('statusMessage', missingKeyErr);
+      if (videoId) {
+        this.appendAgentMessage(`⚠️ ${missingKeyErr}`, videoId, false);
+      }
       return;
     }
 
@@ -759,10 +807,10 @@ export class AppController {
       );
 
       const provider = appState.get('llmProvider') || 'gemini';
-      if (provider === 'none') {
-        const msg = 'VLM provider is set to None. Configure ai_provider in models.conf to use AI features.';
-        appState.set('statusMessage', msg);
-        this.appendAgentMessage(`⚠️ ${msg}`, videoId, false);
+      const missingKeyErr = this.getMissingVlmKeyError();
+      if (missingKeyErr) {
+        appState.set('statusMessage', missingKeyErr);
+        this.appendAgentMessage(`⚠️ ${missingKeyErr}`, videoId, false);
         appState.set('isAgentResponding', false);
         return;
       }
@@ -776,8 +824,12 @@ export class AppController {
 
       const model =
         provider === 'openai'
-          ? appState.get('openaiModel') || DEFAULT_OPENAI_MODEL
-          : appState.get('agentModel') || DEFAULT_AGENT_MODEL;
+          ? appState.get('openaiModel') ||
+            appState.get('defaultOpenaiModel') ||
+            DEFAULT_OPENAI_MODEL
+          : appState.get('agentModel') ||
+            appState.get('defaultAgentModel') ||
+            DEFAULT_AGENT_MODEL;
       const data: GeminiRequestPlusData = {
         videoId,
         adTextBefore: context.adScriptText || '',
@@ -846,6 +898,20 @@ export class AppController {
           `⚠️ Error from ${source}: ${errMsg}`, videoId, false);
         this.activeRequest = null;
         appState.set('isAgentResponding', false);
+        const serviceAlert = classifyServiceError(error, provider, 'VLM');
+        if (serviceAlert) {
+          void showErrorModal({
+            title: serviceAlert.title,
+            summary: serviceAlert.summary,
+            details: serviceAlert.details,
+            suggestions: serviceAlert.suggestions,
+            showOpenSettings: true,
+          }).then((action) => {
+            if (action === 'open-settings') {
+              this.openSettings();
+            }
+          });
+        }
       };
 
       if (localFile) {
@@ -868,6 +934,24 @@ export class AppController {
       this.appendAgentMessage(`⚠️ Sorry, an unexpected error occurred: ${describeError(e)}`, videoId, false);
       this.activeRequest = null;
       appState.set('isAgentResponding', false);
+      const serviceAlert = classifyServiceError(
+        e,
+        appState.get('llmProvider') || 'gemini',
+        'VLM',
+      );
+      if (serviceAlert) {
+        void showErrorModal({
+          title: serviceAlert.title,
+          summary: serviceAlert.summary,
+          details: serviceAlert.details,
+          suggestions: serviceAlert.suggestions,
+          showOpenSettings: true,
+        }).then((action) => {
+          if (action === 'open-settings') {
+            this.openSettings();
+          }
+        });
+      }
     }
   }
 
@@ -1007,9 +1091,18 @@ export class AppController {
   // --- Settings Management ---
 
   public async saveSettings(settings: {
+    llmProvider?: 'gemini' | 'openai' | 'none';
+    userGeminiApiKey?: string;
+    userOpenaiApiKey?: string;
+    useCustomGeminiKey?: boolean;
+    useCustomOpenaiKey?: boolean;
     ttsProvider?: 'gemini' | 'openai' | 'kokoro';
     ttsLanguage?: string;
     ttsVoice?: string;
+    agentModel?: string;
+    openaiModel?: string;
+    speechModel?: string;
+    openaiTtsModel?: string;
     audioDuckingEnabled?: boolean;
     duckVolumePercent?: number;
     duckAttackMs?: number;
@@ -1017,6 +1110,21 @@ export class AppController {
     duckHoldMs?: number;
     hotkeys?: HotkeyConfigEntry[];
   }) {
+    if (settings.llmProvider !== undefined) {
+      appState.set('llmProvider', settings.llmProvider);
+    }
+    if (settings.userGeminiApiKey !== undefined) {
+      appState.set('userGeminiApiKey', settings.userGeminiApiKey.trim());
+    }
+    if (settings.userOpenaiApiKey !== undefined) {
+      appState.set('userOpenaiApiKey', settings.userOpenaiApiKey.trim());
+    }
+    if (settings.useCustomGeminiKey !== undefined) {
+      appState.set('useCustomGeminiKey', settings.useCustomGeminiKey);
+    }
+    if (settings.useCustomOpenaiKey !== undefined) {
+      appState.set('useCustomOpenaiKey', settings.useCustomOpenaiKey);
+    }
     if (settings.ttsProvider !== undefined) {
       appState.set('ttsProvider', settings.ttsProvider);
       const validVoices = getVoicesForTtsProvider(settings.ttsProvider);
@@ -1030,6 +1138,18 @@ export class AppController {
     }
     if (settings.ttsVoice !== undefined) {
       appState.set('ttsVoice', settings.ttsVoice);
+    }
+    if (settings.agentModel !== undefined) {
+      appState.set('agentModel', settings.agentModel.trim());
+    }
+    if (settings.openaiModel !== undefined) {
+      appState.set('openaiModel', settings.openaiModel.trim());
+    }
+    if (settings.speechModel !== undefined) {
+      appState.set('speechModel', settings.speechModel.trim());
+    }
+    if (settings.openaiTtsModel !== undefined) {
+      appState.set('openaiTtsModel', settings.openaiTtsModel.trim());
     }
     if (settings.audioDuckingEnabled !== undefined) {
       appState.set('audioDuckingEnabled', settings.audioDuckingEnabled);
@@ -1064,10 +1184,25 @@ export class AppController {
     const newHotkeys = await retrieveHotkeyConfigsFromDB();
     this.hotkeyManager.setConfigs(newHotkeys);
 
+    if (
+      typeof localStorage !== 'undefined' &&
+      typeof localStorage.removeItem === 'function'
+    ) {
+      localStorage.removeItem('userSettings_llmProvider');
+      localStorage.removeItem('userSettings_ttsProvider');
+    }
+
+    appState.set('userGeminiApiKey', '');
+    appState.set('userOpenaiApiKey', '');
+    appState.set('useCustomGeminiKey', false);
+    appState.set('useCustomOpenaiKey', false);
     const cloudTtsProvider = appState.get('cloudTtsProvider') || 'gemini';
-    appState.set('ttsProvider', cloudTtsProvider);
     appState.set('ttsLanguage', 'en-US');
     appState.set('ttsVoice', getDefaultVoiceForTtsProvider(cloudTtsProvider));
+    appState.set('agentModel', '');
+    appState.set('openaiModel', '');
+    appState.set('speechModel', '');
+    appState.set('openaiTtsModel', '');
     appState.set('audioDuckingEnabled', DEFAULT_AUDIO_DUCKING_ENABLED);
     appState.set('duckVolumePercent', DEFAULT_DUCK_VOLUME_PERCENT);
     appState.set('duckAttackMs', DEFAULT_DUCK_ATTACK_MS);
@@ -1084,19 +1219,11 @@ export class AppController {
     const videoId = appState.get('currentVideoId');
     const isGenerating = appState.get('isAdAudioGenerating');
     const isResponding = appState.get('isAgentResponding');
-    const llmProvider = appState.get('llmProvider') || 'gemini';
-    const activeKey =
-      llmProvider === 'openai'
-        ? appState.get('openaiApiKey')?.trim() || appState.get('geminiApiKey')?.trim()
-        : appState.get('geminiApiKey')?.trim();
-    const hasVlmKey =
-      llmProvider !== 'none' &&
-      Boolean(getInjectedGeminiApiKey() || activeKey);
 
     appState.set('isPlayEnabled', !!videoId);
-    appState.set('isGenerateEnabled', !!videoId && hasVlmKey && !isResponding);
+    appState.set('isGenerateEnabled', !!videoId && !isResponding);
     appState.set('isClearEnabled', !!videoId);
     appState.set('isExportEnabled', !!videoId && !isGenerating && !isResponding);
-    appState.set('isAgentInputEnabled', !!videoId && hasVlmKey && !isResponding);
+    appState.set('isAgentInputEnabled', !!videoId && !isResponding);
   }
 }

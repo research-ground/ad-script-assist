@@ -29,17 +29,18 @@ export enum ModelName {
   GEMINI_3_5_FLASH_LITE = 'gemini-3.5-flash-lite',
   GEMINI_3_5_FLASH = 'gemini-3.5-flash',
   GEMINI_3_8_FLASH = 'gemini-3.8-flash',
+  GEMINI_4_HYDROGEN = 'gemini-4-hydrogen',
   GEMINI_3_1_FLASH_TTS = 'gemini-3.1-flash-tts-preview',
 }
 
 /** The default Gemini model to use for Text-to-Speech. Using undefined for standard Cloud TTS. */
 export const DEFAULT_TTS_MODEL = undefined;
 /** The default Gemini model to use for the agent chat. */
-export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_3_5_FLASH_LITE;
+export const DEFAULT_AGENT_MODEL = ModelName.GEMINI_4_HYDROGEN;
 /** The default Gemini model for AD speech (used when the provider is Gemini). */
 export const DEFAULT_SPEECH_MODEL = ModelName.GEMINI_3_1_FLASH_TTS;
 /** The default OpenAI model to use for the agent chat. */
-export const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+export const DEFAULT_OPENAI_MODEL = 'gpt-6-luna';
 /** The default OpenAI model for AD speech (used when the cloud TTS provider is OpenAI). */
 export const DEFAULT_OPENAI_TTS_MODEL = 'tts-1';
 
@@ -118,6 +119,8 @@ export const DEFAULT_KOKORO_VOICE = 'af_heart';
 /** Suggestions for the free-text model fields in Settings (any model name can be typed). */
 export const AGENT_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => !m.includes('tts'));
 export const SPEECH_MODEL_SUGGESTIONS = Object.values(ModelName).filter((m) => m.includes('tts'));
+export const OPENAI_MODEL_SUGGESTIONS = ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'];
+export const OPENAI_TTS_MODEL_SUGGESTIONS = ['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts'];
 
 export const TTS_LANGUAGES = [
   { code: 'en-US', label: 'English (US)' },

@@ -18,6 +18,98 @@
  * @fileoverview Turns API errors into short, human-readable messages.
  */
 
+export type ServiceErrorKind = 'service_unavailable' | 'quota_exceeded';
+
+export interface ServiceErrorAlert {
+  kind: ServiceErrorKind;
+  title: string;
+  summary: string;
+  details: string;
+  suggestions: string[];
+}
+
+/**
+ * Classifies transient service outages (HTTP 503 / UNAVAILABLE / overloaded)
+ * and quota or rate-limit errors (HTTP 429 / RESOURCE_EXHAUSTED / quota) so
+ * the UI can present an accessible modal alert with recovery steps.
+ * Returns `null` for all other error types.
+ */
+export function classifyServiceError(
+  error: unknown,
+  provider?: 'gemini' | 'openai' | 'none',
+  serviceLabel: 'VLM' | 'TTS' = 'VLM',
+): ServiceErrorAlert | null {
+  const details = describeError(error, provider);
+  const raw = error instanceof Error ? error.message : String(error);
+  const combined = `${details}\n${raw}`.toLowerCase();
+
+  const isQuotaError =
+    /\b429\b/.test(combined) ||
+    combined.includes('resource_exhausted') ||
+    combined.includes('quota') ||
+    combined.includes('rate limit') ||
+    combined.includes('rate_limit') ||
+    combined.includes('too many requests') ||
+    combined.includes('billing hard limit');
+
+  if (isQuotaError) {
+    const isTts = serviceLabel === 'TTS';
+    return {
+      kind: 'quota_exceeded',
+      title: isTts
+        ? 'Text-to-Speech Quota or Rate Limit Reached'
+        : 'AI Service Quota or Rate Limit Reached',
+      summary: isTts
+        ? 'The cloud Text-to-Speech service reached its usage quota or rate limit. Narration fell back to local Kokoro speech.'
+        : 'The AI service has reached its usage quota or rate limit, so this request could not be completed right now.',
+      details,
+      suggestions: isTts
+        ? [
+            'Wait a moment before regenerating cloud speech.',
+            'Open Settings to switch TTS Engine to Kokoro (Local Browser TTS), choose another speech model, or enter your own API key.',
+          ]
+        : [
+            'Wait a moment and try your request again.',
+            'Open Settings to switch to a different model or provider, or enter your own personal API key.',
+          ],
+    };
+  }
+
+  const isServiceUnavailable =
+    /\b503\b/.test(combined) ||
+    combined.includes('service unavailable') ||
+    combined.includes('status":"unavailable') ||
+    combined.includes('(unavailable)') ||
+    combined.includes('high demand') ||
+    combined.includes('overloaded') ||
+    combined.includes('temporarily unavailable');
+
+  if (isServiceUnavailable) {
+    const isTts = serviceLabel === 'TTS';
+    return {
+      kind: 'service_unavailable',
+      title: isTts
+        ? 'Text-to-Speech Service Temporarily Unavailable (503)'
+        : 'AI Service Temporarily Unavailable (503)',
+      summary: isTts
+        ? 'The cloud Text-to-Speech service is temporarily overloaded or unavailable (HTTP 503). Narration fell back to local Kokoro speech.'
+        : 'The AI model service is temporarily overloaded or unavailable (HTTP 503).',
+      details,
+      suggestions: isTts
+        ? [
+            'Wait a few seconds and retry cloud speech generation.',
+            'Open Settings to switch to Kokoro (Local Browser TTS) or another speech model while the service recovers.',
+          ]
+        : [
+            'Wait a few seconds and try your request again.',
+            'Open Settings to try a different model or provider while this service recovers.',
+          ],
+    };
+  }
+
+  return null;
+}
+
 /**
  * Checks whether an API key looks like it belongs to a different provider
  * (e.g. a Google Gemini `AIza...` key used with OpenAI, or an OpenAI `sk-...`

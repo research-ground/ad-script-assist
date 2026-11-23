@@ -332,8 +332,8 @@ export class TopBar extends LitElement {
             aria-label="Generate AD"
             title=${!this.isPlayEnabled
               ? 'Load a video first to generate an Audio Description script'
-              : !this.isGenerateEnabled
-                ? 'Configure a VLM provider and API key in models.conf to generate an Audio Description script'
+              : this.isAgentResponding
+                ? 'AI agent is currently processing a request'
                 : 'Generate an Audio Description script with AI'}
           >
             <span class="material-icons" aria-hidden="true">auto_awesome</span>

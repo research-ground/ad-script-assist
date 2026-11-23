@@ -100,6 +100,91 @@ export const styles = css`
   .help-text {
     font-size: 12px;
     color: #5f6368;
+    line-height: 1.4;
+  }
+
+  .notice-banner {
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .notice-info {
+    background-color: #e8f0fe;
+    border: 1px solid #aecbfa;
+    color: #174ea6;
+  }
+
+  .notice-warning {
+    background-color: #fce8e6;
+    border: 1px solid #f28b82;
+    color: #a50e0e;
+  }
+
+  .key-source-fieldset {
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 0;
+  }
+
+  .key-source-fieldset legend {
+    font-size: 13px;
+    font-weight: 500;
+    color: #202124;
+    padding: 0 6px;
+  }
+
+  .key-source-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 4px;
+  }
+
+  .radio-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: #202124;
+    cursor: pointer;
+  }
+
+  .radio-option input[type='radio'] {
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .model-field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .refresh-models-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .sub-label {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #5f6368;
+  }
+
+  .probe-status {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #5f6368;
+  }
+
+  .probe-error {
+    color: #a50e0e;
   }
 
   .hotkey-list-container {

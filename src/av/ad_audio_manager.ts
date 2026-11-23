@@ -17,9 +17,10 @@
 import { AdSegment, ConversationEntry } from '../core/types';
 import { appState } from '../core/app_state';
 import { AdGenerator } from '../ai/ad_generator';
-import { describeError } from '../ai/describe_error';
+import { classifyServiceError, describeError } from '../ai/describe_error';
 import { setTtsFallbackListener } from '../ai/tts_client';
 import { compileADAudioTrack } from './audio_utils';
+import { showErrorModal } from '../web/components/error_modal';
 import { addConversationEntryToDB, storeAdSegmentsToDB } from '../web/storage/db';
 
 export class AdAudioManager {
@@ -169,6 +170,29 @@ export class AdAudioManager {
       if (this.failedCount > 0) {
         this.postErrorToChat(currentVideoId,
           `⚠️ Couldn't generate audio for ${this.failedCount} segment(s): ${describeError(this.lastError)}`);
+      }
+
+      const ttsErr = this.fallbackReason || this.lastError;
+      if (ttsErr) {
+        const ttsProvider = appState.get('ttsProvider');
+        const providerForAlert =
+          ttsProvider === 'openai' || ttsProvider === 'gemini'
+            ? ttsProvider
+            : undefined;
+        const serviceAlert = classifyServiceError(ttsErr, providerForAlert, 'TTS');
+        if (serviceAlert) {
+          void showErrorModal({
+            title: serviceAlert.title,
+            summary: serviceAlert.summary,
+            details: serviceAlert.details,
+            suggestions: serviceAlert.suggestions,
+            showOpenSettings: true,
+          }).then((action) => {
+            if (action === 'open-settings') {
+              appState.set('isSettingsModalOpen', true);
+            }
+          });
+        }
       }
 
       const finalSegments = appState.get('adSegments') || [];
