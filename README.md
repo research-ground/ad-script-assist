@@ -4,7 +4,7 @@ AD Script Assist is a web-based, AI-driven interactive helper for creating, edit
 
 ---
 
-## Demo
+## Demo Server
 
 Thanks to our colleagues at the [ATLAS Lab](https://atlas.unc.edu/) at [UNC](https://unc.edu), we have a live demo server running that you can try out right away:
 
@@ -12,7 +12,7 @@ Thanks to our colleagues at the [ATLAS Lab](https://atlas.unc.edu/) at [UNC](htt
 
 ---
 
-## 1. Overview
+## Overview
 
 AD Script Assist supports multiple model providers, cloud and on-device neural TTS voices, and flexible video sources:
 
@@ -33,7 +33,7 @@ AD Script Assist supports multiple model providers, cloud and on-device neural T
 
 ---
 
-## 2. System Architecture: Client Web App + Server-Side Key & Proxy Shim (`src/server.ts`)
+## System Architecture: Client Web App + Server-Side Key & Proxy Shim (`src/server.ts`)
 
 Originally, AD Script Assist ran 100% in the browser. It now uses a **client-heavy Lit web application paired with a lightweight Node.js server-side key & proxy shim ([`src/server.ts`](src/server.ts))**:
 
@@ -48,7 +48,7 @@ Originally, AD Script Assist ran 100% in the browser. It now uses a **client-hea
 
 ---
 
-## 3. Getting Started
+## Getting Started
 
 You can run AD Script Assist directly in **Google AI Studio** (no local setup required) or **locally** on your machine.
 
@@ -139,7 +139,7 @@ make serve
 
 ---
 
-## 4. Code Layout
+## Code Layout
 
 ```
 ├── metadata.json           # Google AI Studio app metadata (MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API)
@@ -208,7 +208,7 @@ make serve
 
 ---
 
-## 5. Data Management
+## Data Management
 
 Project state and audio caches operate **client-side** in the browser (`localStorage` and `IndexedDB`), while API keys and model configurations stay on the server (`models.conf` via `src/server.ts`):
 
@@ -223,7 +223,7 @@ Project state and audio caches operate **client-side** in the browser (`localSto
 
 ---
 
-## 6. Testing
+## Testing
 
 All test suites run locally using the Node.js test runner.
 
@@ -249,7 +249,7 @@ npm run test:setup
 
 ---
 
-## 7. CLI Commands
+## CLI Commands
 
 AD Script Assist includes a CLI tool for headlessly processing videos, generating AD scripts, answering video-related questions, and mixing audio tracks.
 
