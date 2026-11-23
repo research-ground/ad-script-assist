@@ -1,9 +1,14 @@
-> [!NOTE]
-> This is a work in progress and not yet ready for use by the general public. More info will be available soon.
-
 # AD Script Assist
 
 AD Script Assist is a web-based, AI-driven interactive helper for creating, editing, and mixing audio descriptions (AD) for videos. It helps users generate initial AD scripts and refine them through a natural language chat interface with an AI agent, or use the editor directly as a standalone WebVTT audio description studio with on-device neural text-to-speech.
+
+---
+
+## Demo
+
+Thanks to our colleagues at the [ATLAS Lab](https://atlas.unc.edu/) at [UNC](https://unc.edu), we have a live demo server running that you can try out right away:
+
+- [Try the AD Script Assist Demo](https://goo.gle/ad-script-assist) (`https://goo.gle/ad-script-assist`)
 
 ---
 
@@ -260,6 +265,12 @@ npx tsx src/cli/index.ts -v <id_or_url_or_path> -o <path> [options]
 - `-q, --question <text>`: Ask a question about the video instead of generating an AD script (`answer.txt`).
 - `-p, --provider <provider>`: Choose `gemini` (default) or `openai`.
 - `-h, --help`: Show help text.
+
+---
+
+## Feedback
+
+Have questions, bug reports, or suggestions? You can share feedback with the maintainers at [ad-script-assist@googlegroups.com](mailto:ad-script-assist@googlegroups.com).
 
 ---
 
