@@ -25,8 +25,26 @@ import { OpenAIRequest } from '../ai/openai_client';
 import { parseAgentResponse } from '../ai/agent_response_parser';
 import { PROMPTS } from '../ai/prompts';
 import { AdScriptParser, isValidWebVtt } from '../core/ad_script_parser';
-import { DEFAULT_OPENAI_MODEL } from '../core/constants';
-import { extractFrames, requireFfmpeg } from './video_utils';
+import {
+  DEFAULT_OPENAI_MODEL,
+  getDefaultVoiceForTtsProvider,
+} from '../core/constants';
+import { loadServerConfig } from '../server';
+import {
+  downloadYouTubeVideo,
+  extractFrames,
+  hasFfmpeg,
+  hasYtDlp,
+  mixAudioSegmentsWithVideo,
+  requireFfmpeg,
+} from './video_utils';
+import { compileWavTrack, isWavBuffer } from './wav_utils';
+
+type TtsProvider = 'kokoro' | 'gemini' | 'openai';
+
+function detectAudioExtension(buf: Buffer): 'wav' | 'mp3' {
+  return isWavBuffer(buf) ? 'wav' : 'mp3';
+}
 
 async function main() {
   const { values } = parseArgs({
@@ -51,6 +69,13 @@ async function main() {
         type: 'string',
         short: 'p',
       },
+      tts: {
+        type: 'string',
+        short: 't',
+      },
+      voice: {
+        type: 'string',
+      },
       help: {
         type: 'boolean',
         short: 'h',
@@ -65,12 +90,23 @@ Usage: ad-script-assist [options]
 Options:
   -v, --video <id_or_url_or_path> YouTube Video ID or URL, or local file path
   -o, --outdir <path>             Output directory for generated files
-  -m, --mix                       Mix generated TTS with the video (or just output audio if YT)
+  -m, --mix                       Compile timed AD audio (ad_track.wav) and mux into mixed_output.mp4 when video + ffmpeg are available
   -q, --question <text>           Ask a question about the video instead of generating an AD script
-  -p, --provider <provider>       LLM provider: 'gemini' (default) or 'openai'
+  -p, --provider <provider>       LLM provider: 'gemini' or 'openai' (defaults to models.conf)
+  -t, --tts <provider>            TTS provider: 'kokoro', 'gemini', or 'openai' (defaults to models.conf)
+      --voice <name>              TTS voice name (e.g., 'af_heart', 'Aoede', 'alloy')
   -h, --help                      Show help
     `);
     process.exit(values.help ? 0 : 1);
+  }
+
+  // Load models.conf (and .env/.env.local) so CLI shares configuration with the web app.
+  const serverConfig = loadServerConfig();
+  if (!process.env.GEMINI_API_KEY && serverConfig.realKeys['gemini_api_key']) {
+    process.env.GEMINI_API_KEY = serverConfig.realKeys['gemini_api_key'];
+  }
+  if (!process.env.OPENAI_API_KEY && serverConfig.realKeys['openai_api_key']) {
+    process.env.OPENAI_API_KEY = serverConfig.realKeys['openai_api_key'];
   }
 
   const outdir = path.resolve(values.outdir!);
@@ -95,17 +131,34 @@ Options:
       : `https://www.youtube.com/watch?v=${videoInput}`;
     videoId = videoInput.includes('v=')
       ? new URL(videoInput).searchParams.get('v')!
-      : videoInput.split('/').pop()!;
+      : videoInput.split('/').pop()!.split('?')[0];
     console.log(`Processing YouTube video: ${ytUrl}`);
   }
 
-  const provider = values.provider || 'gemini';
+  const provider =
+    values.provider ||
+    serverConfig.sections['providers']?.['ai_provider'] ||
+    'gemini';
+
+  const configuredTts = (
+    values.tts ||
+    serverConfig.sections['providers']?.['tts_provider'] ||
+    'kokoro'
+  ).toLowerCase();
+  const ttsProvider: TtsProvider =
+    configuredTts === 'gemini' || configuredTts === 'openai' || configuredTts === 'kokoro'
+      ? configuredTts
+      : 'kokoro';
+  const voice = values.voice || getDefaultVoiceForTtsProvider(ttsProvider);
+
+  const geminiModel = serverConfig.sections['models']?.['gemini_model'] || undefined;
+  const openaiModel = serverConfig.sections['models']?.['openai_model'] || DEFAULT_OPENAI_MODEL;
 
   if (provider === 'gemini' && !process.env.GEMINI_API_KEY) {
-    console.error('Error: GEMINI_API_KEY environment variable is not set.');
+    console.error('Error: GEMINI_API_KEY is not set (in environment or models.conf).');
     process.exit(1);
   } else if (provider === 'openai' && !process.env.OPENAI_API_KEY) {
-    console.error('Error: OPENAI_API_KEY environment variable is not set.');
+    console.error('Error: OPENAI_API_KEY is not set (in environment or models.conf).');
     process.exit(1);
   }
 
@@ -131,7 +184,7 @@ Options:
             blob,
             (response) => resolve(response),
             (error) => reject(error),
-            undefined,
+            geminiModel,
             { videoId }
           );
         } else {
@@ -142,7 +195,7 @@ Options:
               frames,
               (response) => resolve(response),
               (error) => reject(error),
-              DEFAULT_OPENAI_MODEL,
+              openaiModel,
               { videoId }
             );
           } catch (err) {
@@ -156,7 +209,7 @@ Options:
             ytUrl,
             (response) => resolve(response),
             (error) => reject(error),
-            undefined,
+            geminiModel,
             { videoId }
           );
         } else {
@@ -165,7 +218,7 @@ Options:
             ytUrl,
             (response) => resolve(response),
             (error) => reject(error),
-            DEFAULT_OPENAI_MODEL,
+            openaiModel,
             { videoId }
           );
         }
@@ -182,16 +235,16 @@ Options:
     if (values.question) {
       console.log('Agent Response:');
       console.log(parsed.response);
-      
+
       const answerPath = path.join(outdir, 'answer.txt');
       let text = `> ${values.question}\n\n${parsed.response}`;
-      
+
       if (parsed.script) {
         console.log('Agent also returned a script snippet:');
         console.log(parsed.script);
         text += `\n\n${parsed.script}`;
       }
-      
+
       fs.writeFileSync(answerPath, text, 'utf-8');
       console.log(`\nAnswer saved to: ${answerPath}`);
       process.exit(0);
@@ -210,75 +263,98 @@ Options:
     console.log(scriptPath);
 
     if (values.mix) {
-      console.log('\\nStarting audio mixing...');
+      console.log(`\nStarting audio mixing using ${ttsProvider} TTS (voice: ${voice})...`);
       const parser = new AdScriptParser();
-      const segments = parser.parse(parsed.script!, videoId);
-      
-      if (isLocal) {
-        console.log('Generating TTS files and mixing over local video...');
-        const { generateTTS } = await import('../ai/tts_client');
-        const { execSync } = await import('child_process');
-        
-        // Save original video to temp file
-        const tempVideoPath = path.join(outdir, 'temp_input.mp4');
-        fs.writeFileSync(tempVideoPath, videoBuffer!);
+      const segments = parser
+        .parse(parsed.script!, videoId)
+        .filter((seg) => seg.script.trim().length > 0);
 
-        const inputs: string[] = ['-i', `"${tempVideoPath}"`];
-        const delays: string[] = [];
-        const amixInputs: string[] = ['[0:a]'];
-        let audioIndex = 1;
+      if (segments.length === 0) {
+        console.log('No AD segments to mix.');
+        return;
+      }
 
-        for (let i = 0; i < segments.length; i++) {
-          if (!segments[i].script.trim()) continue;
-          console.log(`Generating TTS for segment ${i + 1}/${segments.length}...`);
-          const ttsBlob = await generateTTS(segments[i].script, 'Aoede', 1.0, provider);
-          const ttsBuffer = Buffer.from(ttsBlob, 'base64');
-          const audioPath = path.join(outdir, `temp_audio_${i}.mp3`);
-          fs.writeFileSync(audioPath, ttsBuffer);
-          
-          inputs.push('-i', `"${audioPath}"`);
-          const delayMs = Math.round(segments[i].startTime * 1000);
-          delays.push(`[${audioIndex}:a]adelay=${delayMs}|${delayMs}[a${audioIndex}]`);
-          amixInputs.push(`[a${audioIndex}]`);
-          audioIndex++;
-        }
+      const { generateTTS } = await import('../ai/tts_client');
+      const canMuxYouTube = !isLocal && hasYtDlp() && hasFfmpeg();
+      const willMuxVideo = isLocal || canMuxYouTube;
 
-        if (audioIndex > 1) {
-          const filterComplex = [
-            ...delays,
-            `${amixInputs.join('')}amix=inputs=${audioIndex}:duration=first:dropout_transition=2[aout]`
-          ].join('; ');
-          
-          const outVideoPath = path.join(outdir, 'mixed_output.mp4');
-          console.log('Running FFmpeg mix command...');
-          execSync(`ffmpeg -y ${inputs.join(' ')} -filter_complex "${filterComplex}" -map 0:v -map "[aout]" -c:v copy -c:a aac "${outVideoPath}"`, { stdio: 'inherit' });
-          console.log(`Mixed video saved to: ${outVideoPath}`);
-        } else {
-          console.log('No AD segments to mix. Local video unchanged.');
-        }
+      const generatedSegments: Array<{
+        buffer: Buffer;
+        startTime: number;
+        endTime?: number;
+      }> = [];
+      for (let i = 0; i < segments.length; i++) {
+        console.log(`Generating TTS for segment ${i + 1}/${segments.length}...`);
+        const ttsBase64 = await generateTTS(segments[i].script, voice, 1.0, ttsProvider);
+        generatedSegments.push({
+          buffer: Buffer.from(ttsBase64, 'base64'),
+          startTime: segments[i].startTime,
+          endTime: segments[i].endTime,
+        });
+      }
 
-        // Cleanup
-        fs.unlinkSync(tempVideoPath);
-        for (let i = 0; i < segments.length; i++) {
-          if (segments[i].script.trim()) {
-            try { fs.unlinkSync(path.join(outdir, `temp_audio_${i}.mp3`)); } catch (e) {}
+      const allWav = generatedSegments.every((seg) => isWavBuffer(seg.buffer));
+      const tempAudioFiles: string[] = [];
+      let muxInputs: Array<{ audioPath: string; startTime: number }> = [];
+
+      if (allWav) {
+        const compiledWav = compileWavTrack(
+          generatedSegments.map((seg) => ({
+            wavBuffer: seg.buffer,
+            startTime: seg.startTime,
+            endTime: seg.endTime,
+          })),
+        );
+        const adTrackPath = path.join(outdir, 'ad_track.wav');
+        fs.writeFileSync(adTrackPath, compiledWav);
+        console.log(`Compiled AD audio track saved to: ${adTrackPath}`);
+        muxInputs = [{ audioPath: adTrackPath, startTime: 0 }];
+      } else {
+        for (let i = 0; i < generatedSegments.length; i++) {
+          const seg = generatedSegments[i];
+          const ext = detectAudioExtension(seg.buffer);
+          const filename = willMuxVideo ? `temp_audio_${i}.${ext}` : `segment_${i}.${ext}`;
+          const audioPath = path.join(outdir, filename);
+          fs.writeFileSync(audioPath, seg.buffer);
+          muxInputs.push({ audioPath, startTime: seg.startTime });
+          if (willMuxVideo) {
+            tempAudioFiles.push(audioPath);
+          } else {
+            console.log(`Saved ${audioPath}`);
           }
         }
-      } else {
-        // For YouTube, just mix the audio alone without video
-        // We pass a dummy empty video blob to the mixer, which will just fail or mix audio over nothing.
-        // Actually, FFMPEGMixer is currently hardcoded to map 0:v (video). If video is empty, it fails.
-        // We'll write a simple unmixed TTS script for YT tests
-        console.log('Generating TTS files for YT video segments...');
-        const { generateTTS } = await import('../ai/tts_client');
-        for (let i = 0; i < segments.length; i++) {
-          if (!segments[i].script.trim()) continue;
-          const ttsBlob = await generateTTS(segments[i].script, 'Aoede', 1.0, provider);
-          const ttsBuffer = Buffer.from(ttsBlob, 'base64');
-          const audioPath = path.join(outdir, `segment_${i}.mp3`);
-          fs.writeFileSync(audioPath, ttsBuffer);
-          console.log(`Saved ${audioPath}`);
+      }
+
+      if (willMuxVideo) {
+        let sourceVideoPath = videoInput;
+        let downloadedTempVideo: string | null = null;
+        try {
+          if (!isLocal) {
+            downloadedTempVideo = path.join(outdir, 'temp_yt_input.mp4');
+            console.log(`Downloading YouTube video via yt-dlp: ${ytUrl}`);
+            downloadYouTubeVideo(ytUrl, downloadedTempVideo);
+            sourceVideoPath = downloadedTempVideo;
+          }
+
+          const outVideoPath = path.join(outdir, 'mixed_output.mp4');
+          console.log('Running FFmpeg mix command...');
+          mixAudioSegmentsWithVideo(sourceVideoPath, muxInputs, outVideoPath);
+          console.log(`Mixed video saved to: ${outVideoPath}`);
+        } finally {
+          if (downloadedTempVideo && fs.existsSync(downloadedTempVideo)) {
+            try { fs.unlinkSync(downloadedTempVideo); } catch { /* ignore */ }
+          }
+          for (const tempFile of tempAudioFiles) {
+            try { fs.unlinkSync(tempFile); } catch { /* ignore */ }
+          }
         }
+      } else if (!isLocal) {
+        const missing = [!hasYtDlp() ? 'yt-dlp' : '', !hasFfmpeg() ? 'ffmpeg' : '']
+          .filter(Boolean)
+          .join(' and ');
+        console.log(
+          `Install ${missing} to also download and mux YouTube videos into mixed_output.mp4.`,
+        );
       }
     }
   } catch (err) {

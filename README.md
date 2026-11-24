@@ -260,10 +260,12 @@ npx tsx src/cli/index.ts -v <id_or_url_or_path> -o <path> [options]
 
 ### Options
 - `-v, --video <id_or_url_or_path>`: (Required) 11-character YouTube ID, full YouTube URL, or path to a local MP4 file.
-- `-o, --outdir <path>`: (Required) Output directory for `script.vtt`, generated audio, or answers.
-- `-m, --mix`: Mix generated TTS audio over the video (`mixed_output.mp4` for local videos via `ffmpeg`, or per-segment audio files for YouTube videos).
+- `-o, --outdir <path>`: (Required) Output directory for `script.vtt`, generated audio/video, or answers.
+- `-m, --mix`: Compile a single time-aligned AD audio track (`ad_track.wav`, pure Node with no `ffmpeg` required) and mux it over the video into `mixed_output.mp4` via `ffmpeg` (for YouTube videos, automatically downloads and muxes when `yt-dlp` and `ffmpeg` are available).
 - `-q, --question <text>`: Ask a question about the video instead of generating an AD script (`answer.txt`).
-- `-p, --provider <provider>`: Choose `gemini` (default) or `openai`.
+- `-p, --provider <provider>`: Choose `gemini` or `openai` (defaults to `ai_provider` in `models.conf`).
+- `-t, --tts <provider>`: Choose `kokoro` (local neural TTS), `gemini`, or `openai` (defaults to `tts_provider` in `models.conf`).
+- `--voice <name>`: Override the TTS voice (e.g., `af_heart`, `af_bella`, `Aoede`, `alloy`).
 - `-h, --help`: Show help text.
 
 ---

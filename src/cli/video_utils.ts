@@ -19,9 +19,19 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
+/** Returns true if ffmpeg is available on the PATH. */
+export function hasFfmpeg(): boolean {
+  return !spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).error;
+}
+
+/** Returns true if yt-dlp is available on the PATH. */
+export function hasYtDlp(): boolean {
+  return !spawnSync('yt-dlp', ['--version'], { stdio: 'ignore' }).error;
+}
+
 /** Exits with install instructions if ffmpeg isn't on the PATH. */
 export function requireFfmpeg(reason: string) {
-  if (!spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).error) return;
+  if (hasFfmpeg()) return;
   console.error(`ffmpeg is required ${reason}, but it wasn't found on your PATH.
 Install it, then try again:
   macOS:   brew install ffmpeg
@@ -29,6 +39,131 @@ Install it, then try again:
   Windows: winget install ffmpeg
 Or use the web app, which doesn't need ffmpeg.`);
   process.exit(1);
+}
+
+/**
+ * Downloads a YouTube video to `outPath` as an MP4 using yt-dlp.
+ * Prefers H.264 + AAC streams for broad player compatibility.
+ */
+export function downloadYouTubeVideo(ytUrl: string, outPath: string): void {
+  const args = [
+    '-f',
+    'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    '--merge-output-format',
+    'mp4',
+    '--no-playlist',
+    '--force-overwrites',
+    '-o',
+    outPath,
+    ytUrl,
+  ];
+  const result = spawnSync('yt-dlp', args, { stdio: 'inherit' });
+  if (result.error) {
+    throw new Error(`Failed to invoke yt-dlp: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`yt-dlp exited with code ${result.status}`);
+  }
+  if (!fs.existsSync(outPath)) {
+    throw new Error(`yt-dlp finished but expected output file was not found: ${outPath}`);
+  }
+}
+
+/** Returns true if the given video file contains at least one audio stream. */
+export function hasAudioStream(videoPath: string): boolean {
+  const probe = spawnSync(
+    'ffprobe',
+    [
+      '-v', 'error',
+      '-select_streams', 'a',
+      '-show_entries', 'stream=index',
+      '-of', 'csv=p=0',
+      videoPath,
+    ],
+    { encoding: 'utf-8' },
+  );
+  if (probe.error) {
+    // If ffprobe isn't available, assume the video has an audio stream.
+    return true;
+  }
+  return Boolean(probe.stdout && probe.stdout.trim().length > 0);
+}
+
+/**
+ * Mixes timed audio description segments over a video file using ffmpeg,
+ * gently ducking the original audio track while AD narration plays.
+ */
+export function mixAudioSegmentsWithVideo(
+  videoPath: string,
+  segments: Array<{ audioPath: string; startTime: number }>,
+  outVideoPath: string,
+): void {
+  if (segments.length === 0) {
+    throw new Error('No audio segments provided to mix.');
+  }
+
+  const ffmpegArgs: string[] = ['-y', '-i', videoPath];
+  const filterParts: string[] = [];
+  const adLabels: string[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const inputIdx = i + 1;
+    ffmpegArgs.push('-i', segments[i].audioPath);
+    const delayMs = Math.max(0, Math.round(segments[i].startTime * 1000));
+    filterParts.push(
+      `[${inputIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo,adelay=${delayMs}|${delayMs}[a${inputIdx}]`,
+    );
+    adLabels.push(`[a${inputIdx}]`);
+  }
+
+  if (adLabels.length === 1) {
+    filterParts.push(`${adLabels[0]}anull[ad]`);
+  } else {
+    filterParts.push(
+      `${adLabels.join('')}amix=inputs=${adLabels.length}:duration=longest:normalize=0[ad]`,
+    );
+  }
+
+  const videoHasAudio = hasAudioStream(videoPath);
+  if (videoHasAudio) {
+    filterParts.push('[ad]apad,asplit=2[ad_sc][ad_mix]');
+    filterParts.push('[0:a]aformat=sample_rates=44100:channel_layouts=stereo[orig]');
+    filterParts.push(
+      '[orig][ad_sc]sidechaincompress=threshold=0.02:ratio=4:attack=50:release=300:makeup=1[bg]',
+    );
+    filterParts.push('[bg][ad_mix]amix=inputs=2:duration=first:normalize=0[aout]');
+  } else {
+    filterParts.push('[ad]anull[aout]');
+  }
+
+  ffmpegArgs.push(
+    '-filter_complex',
+    filterParts.join('; '),
+    '-map',
+    '0:v:0',
+    '-map',
+    '[aout]',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-movflags',
+    '+faststart',
+  );
+  if (!videoHasAudio) {
+    ffmpegArgs.push('-shortest');
+  }
+  ffmpegArgs.push(outVideoPath);
+
+  const result = spawnSync('ffmpeg', ffmpegArgs, { stdio: 'inherit' });
+  if (result.error) {
+    throw new Error(`Failed to invoke ffmpeg: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`ffmpeg exited with code ${result.status}`);
+  }
 }
 
 /**

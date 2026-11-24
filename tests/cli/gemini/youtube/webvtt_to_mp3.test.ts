@@ -15,9 +15,20 @@
  */
 
 import test from 'node:test';
+import { hasFfmpeg, hasYtDlp } from '../../../../src/cli/video_utils';
 import { runCliCommand, YT_VIDEO } from '../../test_utils';
 
-test('WebVTT to MP3', () => {
-  // Generates WebVTT and MP3 files
-  runCliCommand(__dirname, 'youtube_webvtt_to_mp3', `-v ${YT_VIDEO} --mix`, ['script.vtt', 'segment_0.mp3']);
+test('WebVTT to AD audio / mixed MP4 (YouTube + Kokoro)', () => {
+  // Generates WebVTT and a single pure-Node compiled ad_track.wav, plus
+  // mixed_output.mp4 when yt-dlp and ffmpeg are available.
+  const expectedFiles =
+    hasYtDlp() && hasFfmpeg()
+      ? ['script.vtt', 'ad_track.wav', 'mixed_output.mp4']
+      : ['script.vtt', 'ad_track.wav'];
+  runCliCommand(
+    __dirname,
+    'youtube_webvtt_to_mp3',
+    `-v ${YT_VIDEO} --mix --tts kokoro`,
+    expectedFiles,
+  );
 });
